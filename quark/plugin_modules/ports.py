@@ -21,6 +21,7 @@ from neutron.openstack.common import uuidutils
 from neutron import quota
 from oslo.config import cfg
 
+import quark.agent
 from quark.db import api as db_api
 from quark.drivers import registry
 from quark import exceptions as q_exc
@@ -32,6 +33,7 @@ from quark import utils
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
 STRATEGY = network_strategy.STRATEGY
+AGENT_API = quark.agent.AGENT_API
 
 
 def create_port(context, port):
@@ -347,6 +349,7 @@ def get_port(context, id, fields=None):
     results = db_api.port_find(context, id=id, fields=fields,
                                scope=db_api.ONE)
 
+    AGENT_API.notify_device_updated(id)
     if not results:
         raise exceptions.PortNotFound(port_id=id, net_id='')
 
@@ -374,6 +377,7 @@ def get_ports(context, filters=None, fields=None):
     """
     LOG.info("get_ports for tenant %s filters %s fields %s" %
             (context.tenant_id, filters, fields))
+    AGENT_API.notify()
     if filters is None:
         filters = {}
     query = db_api.port_find(context, fields=fields, **filters)
