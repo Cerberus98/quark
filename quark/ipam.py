@@ -82,56 +82,56 @@ class QuarkIpam(object):
         elevated = context.elevated()
 
         if version == 6 and "mac_address" in kwargs and kwargs["mac_address"]:
+            # Defers to the create case. The reason why is we'd have to look
+            # up subnets here to correctly generate the v6. If we split them
+            # up into reallocate and create, we'd be looking up the same
+            # subnets twice, which is a waste of time.
             return []
 
         # We never want to take the chance of an infinite loop here. Instead,
         # we'll clean up multiple bad IPs if we find them (assuming something
         # is really wrong)
 
-        #TODO(mdietz & mpath): Perhaps remove, select for update might quash
-        for times in xrange(3):
-            sub_ids = []
-            if subnets:
-                sub_ids = subnets
-            else:
-                if segment_id:
-                    subnets = db_api.subnet_find(elevated,
-                                                 network_id=net_id,
-                                                 segment_id=segment_id)
-                    sub_ids = [s["id"] for s in subnets]
-                    if not sub_ids:
-                        raise exceptions.IpAddressGenerationFailure(
-                            net_id=net_id)
+        sub_ids = []
+        if subnets:
+            sub_ids = subnets
+        else:
+            if segment_id:
+                subnets = db_api.subnet_find(elevated,
+                                             network_id=net_id,
+                                             segment_id=segment_id)
+                sub_ids = [s["id"] for s in subnets]
+                if not sub_ids:
+                    raise exceptions.IpAddressGenerationFailure(
+                        net_id=net_id)
 
-            ip_kwargs = {
-                "network_id": net_id, "reuse_after": reuse_after,
-                "deallocated": True, "scope": db_api.ONE,
-                "ip_address": ip_address, "lock_mode": True,
-                "version": version, "order_by": "address"}
+        ip_kwargs = {
+            "network_id": net_id, "reuse_after": reuse_after,
+            "deallocated": True, "scope": db_api.ONE,
+            "ip_address": ip_address, "lock_mode": True,
+            "version": version, "order_by": "address"}
 
-            if sub_ids:
-                ip_kwargs["subnet_id"] = sub_ids
+        if sub_ids:
+            ip_kwargs["subnet_id"] = sub_ids
 
-            address = db_api.ip_address_find(elevated, **ip_kwargs)
+        address = db_api.ip_address_find(elevated, **ip_kwargs)
 
-            if address:
-                #NOTE(mdietz): We should always be in the CIDR but we've
-                #              also said that before :-/
-                if address.get("subnet"):
-                    cidr = netaddr.IPNetwork(address["subnet"]["cidr"])
-                    addr = netaddr.IPAddress(int(address["address"]),
-                                             version=int(cidr.version))
-                    if addr in cidr:
-                        updated_address = db_api.ip_address_update(
-                            elevated, address, deallocated=False,
-                            deallocated_at=None,
-                            allocated_at=timeutils.utcnow())
-                        return [updated_address]
-                    else:
-                        # Make sure we never find it again
-                        context.session.delete(address)
-                        continue
-            break
+        if address:
+            #NOTE(mdietz): We should always be in the CIDR but we've
+            #              also said that before :-/
+            if address.get("subnet"):
+                cidr = netaddr.IPNetwork(address["subnet"]["cidr"])
+                addr = netaddr.IPAddress(int(address["address"]),
+                                         version=int(cidr.version))
+                if addr in cidr:
+                    updated_address = db_api.ip_address_update(
+                        elevated, address, deallocated=False,
+                        deallocated_at=None,
+                        allocated_at=timeutils.utcnow())
+                    return [updated_address]
+                else:
+                    # Make sure we never find it again
+                    context.session.delete(address)
         return []
 
     def is_strategy_satisfied(self, ip_addresses):
@@ -160,7 +160,7 @@ class QuarkIpam(object):
         return next_ip
 
     def _allocate_from_subnet(self, context, net_id, subnet,
-                                 ip_address=None, **kwargs):
+                              ip_address=None, **kwargs):
         ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
         # Creating this IP for the first time
         next_ip = None
@@ -185,7 +185,7 @@ class QuarkIpam(object):
 
     def _allocate_from_v6_subnet(self, context, net_id, subnet,
                                  ip_address=None, **kwargs):
-        """ This attempts to allocate v6 addresses as per RFC2462. To
+        """This attempts to allocate v6 addresses as per RFC2462. To
         accomodate this, we effectively treat all v6 assignment as a
         first time allocation utilizing the MAC address of the VIF. Because
         we recycle MACs, we will eventually attempt to recreate a previously
@@ -196,10 +196,6 @@ class QuarkIpam(object):
         each and every subnet in the existing reallocate logic, as we'd
         have to iterate over each and every subnet returned
         """
-        LOG.critical("@" * 80)
-        LOG.critical(ip_address)
-        LOG.critical(kwargs)
-        LOG.critical("@" * 80)
         if not (ip_address is None and "mac_address" in kwargs and
                 kwargs["mac_address"]):
             return self._allocate_from_subnet(context, net_id, subnet,
@@ -209,12 +205,16 @@ class QuarkIpam(object):
             int_val = netaddr.IPNetwork(subnet["cidr"]).value
             mac = netaddr.EUI(kwargs["mac_address"]["address"])
             int_val += mac.eui64().value
-            int_val ^= netaddr.IPAddress("::0200:0:0:0").value
+            # NOTE(mdietz): equivalent to the following line, but converting
+            #               v6 addresses in netaddr is very slow.
+            # int_val ^= netaddr.IPAddress("::0200:0:0:0").value
+            int_val ^= 144115188075855872
             ip_address = netaddr.IPAddress(int_val)
 
             address = db_api.ip_address_find(
                 context, network_id=net_id, ip_address=ip_address,
-                used_by_tenant_id=context.tenant_id, scope=db_api.ONE)
+                used_by_tenant_id=context.tenant_id, scope=db_api.ONE,
+                lock_mode=True)
             if address:
                 return db_api.ip_address_update(
                     context, address, deallocated=False, deallocated_at=None,
@@ -231,8 +231,8 @@ class QuarkIpam(object):
             address = None
             if int(subnet["ip_version"]) == 4:
                 address = self._allocate_from_subnet(context, net_id,
-                                                        subnet, ip_address,
-                                                        **kwargs)
+                                                     subnet, ip_address,
+                                                     **kwargs)
             else:
                 address = self._allocate_from_v6_subnet(context, net_id,
                                                         subnet, ip_address,
@@ -283,10 +283,6 @@ class QuarkIpam(object):
             subnets = [self.select_subnet(context, net_id, ip_address,
                                           segment_id, subnet_ids=subnets)]
 
-        LOG.critical("Z" * 80)
-        LOG.critical(subnets)
-        LOG.critical(kwargs)
-        LOG.critical("Z" * 80)
         ips = self._allocate_ips_from_subnets(context, net_id, subnets,
                                               ip_address, **kwargs)
         new_addresses.extend(ips)
@@ -427,12 +423,9 @@ class QuarkIpamBOTHREQ(QuarkIpamBOTH):
     def _choose_available_subnet(self, context, net_id, version=None,
                                  segment_id=None, ip_address=None,
                                  reallocated_ips=None):
-        LOG.critical("A" * 80)
         subnets = super(QuarkIpamBOTHREQ, self)._choose_available_subnet(
             context, net_id, version, segment_id, ip_address, reallocated_ips)
 
-        LOG.critical(net_id)
-        LOG.critical("A" * 80)
         if len(reallocated_ips) + len(subnets) < 2:
             raise exceptions.IpAddressGenerationFailure(net_id=net_id)
         return subnets

@@ -69,9 +69,6 @@ def create_port(context, port):
             raise q_exc.AmbiguousNetworkId(net_id=net_id)
 
     ipam_driver = ipam.IPAM_REGISTRY.get_strategy(net["ipam_strategy"])
-    LOG.critical("D" * 80)
-    LOG.critical(ipam_driver)
-    LOG.critical("D" * 80)
     net_driver = registry.DRIVER_REGISTRY.get_driver(net["network_plugin"])
     group_ids, security_groups = v.make_security_group_list(
         context, port["port"].pop("security_groups", None))
