@@ -993,3 +993,11 @@ class QuarkIPAddressAllocationNotifications(QuarkIpamBaseTest):
                      created_at=address["created_at"],
                      deleted_at="456",
                      used_by_tenant_id=1))
+
+
+class QuarkIpamTestRFC2462IpGeneration(QuarkIpamBaseTest):
+    def test_create_generates_valid_ip(self):
+        mac = netaddr.EUI("AA:BB:CC:DD:EE:FF")
+        cidr = "fe80::/120"
+        ip = quark.ipam.rfc2462_ip(mac, cidr)
+        self.assertEqual(ip, netaddr.IPAddress('fe80::a8bb:ccff:fedd:eeff'))

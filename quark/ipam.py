@@ -17,8 +17,9 @@
 Quark Pluggable IPAM
 """
 
-import netaddr
+import random
 
+import netaddr
 from neutron.common import exceptions
 from neutron.openstack.common import log as logging
 from neutron.openstack.common.notifier import api as notifier_api
@@ -29,12 +30,52 @@ from oslo.config import cfg
 from quark.db import api as db_api
 from quark.db import models
 
-
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
 
+quark_opts = [
+    cfg.IntOpt('v6_allocation_attempts',
+               default=10,
+               help=_('Number of times to retry generating v6 addresses'
+                      ' before failure'))
+]
+
+CONF.register_opts(quark_opts, "QUARK")
+
+
+def rfc2462_ip(mac, cidr):
+    #NOTE(mdietz): see RFC2462
+    int_val = netaddr.IPNetwork(cidr).value
+    mac = netaddr.EUI(mac)
+    int_val += mac.eui64().value
+
+    # NOTE(mdietz): equivalent to the following line, but converting
+    #               v6 addresses in netaddr is very slow.
+    # int_val ^= netaddr.IPAddress("::0200:0:0:0").value
+    int_val ^= 144115188075855872
+    return int_val
+
+
+def rfc3041_ip(port_id, cidr):
+    random.seed(port_id.int())
+    int_val = netaddr.IPNetwork(cidr).value
+    while True:
+        val = int_val + random.getrandbits(64)
+        # NOTE(mdietz): equivalent to the following line, but converting
+        #               v6 addresses in netaddr is very slow.
+        # int_val ^= netaddr.IPAddress("::0200:0:0:0").value
+        val ^= 144115188075855872
+        yield val
+
+
+def generate_v6(mac, port_id, cidr):
+    yield rfc2462_ip(mac, cidr)
+    for addr in rfc3041_ip(port_id, cidr):
+        yield addr
+
 
 class QuarkIpam(object):
+
     def allocate_mac_address(self, context, net_id, port_id, reuse_after,
                              mac_address=None):
         if mac_address:
@@ -160,7 +201,7 @@ class QuarkIpam(object):
         return next_ip
 
     def _allocate_from_subnet(self, context, net_id, subnet,
-                              ip_address=None, **kwargs):
+                              port_id, ip_address=None, **kwargs):
         ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
         # Creating this IP for the first time
         next_ip = None
@@ -184,7 +225,7 @@ class QuarkIpam(object):
         return address
 
     def _allocate_from_v6_subnet(self, context, net_id, subnet,
-                                 ip_address=None, **kwargs):
+                                 port_id, ip_address=None, **kwargs):
         """This attempts to allocate v6 addresses as per RFC2462. To
         accomodate this, we effectively treat all v6 assignment as a
         first time allocation utilizing the MAC address of the VIF. Because
@@ -201,20 +242,24 @@ class QuarkIpam(object):
             return self._allocate_from_subnet(context, net_id, subnet,
                                               ip_address, **kwargs)
         else:
-            #NOTE(mdietz): see RFC2462
-            int_val = netaddr.IPNetwork(subnet["cidr"]).value
-            mac = netaddr.EUI(kwargs["mac_address"]["address"])
-            int_val += mac.eui64().value
-            # NOTE(mdietz): equivalent to the following line, but converting
-            #               v6 addresses in netaddr is very slow.
-            # int_val ^= netaddr.IPAddress("::0200:0:0:0").value
-            int_val ^= 144115188075855872
-            ip_address = netaddr.IPAddress(int_val)
+            ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
+            for tries, ip_address in enumerate(generate_v6(
+                kwargs["mac_address"]["address"], port_id, subnet["cidr"])):
+                if tries > CONF.QUARK.v6_allocation_attempts:
+                    raise exceptions.IpAddressGenerationFailure(
+                        net_id=net_id)
 
-            address = db_api.ip_address_find(
-                context, network_id=net_id, ip_address=ip_address,
-                used_by_tenant_id=context.tenant_id, scope=db_api.ONE,
-                lock_mode=True)
+                ip_address = netaddr.IPAddress(ip_address)
+                if ip_policy_cidrs and ip_address in ip_policy_cidrs:
+                    continue
+
+                address = db_api.ip_address_find(
+                    context, network_id=net_id, ip_address=ip_address,
+                    used_by_tenant_id=context.tenant_id, scope=db_api.ONE,
+                    lock_mode=True)
+
+                break
+
             if address:
                 return db_api.ip_address_update(
                     context, address, deallocated=False, deallocated_at=None,
@@ -225,18 +270,18 @@ class QuarkIpam(object):
                     version=subnet["ip_version"], network_id=net_id)
 
     def _allocate_ips_from_subnets(self, context, net_id, subnets,
-                                   ip_address=None, **kwargs):
+                                   port_id, ip_address=None, **kwargs):
         new_addresses = []
         for subnet in subnets:
             address = None
             if int(subnet["ip_version"]) == 4:
                 address = self._allocate_from_subnet(context, net_id,
-                                                     subnet, ip_address,
-                                                     **kwargs)
+                                                     subnet, port_id,
+                                                     ip_address, **kwargs)
             else:
                 address = self._allocate_from_v6_subnet(context, net_id,
-                                                        subnet, ip_address,
-                                                        **kwargs)
+                                                        subnet, port_id,
+                                                        ip_address, **kwargs)
             if address:
                 new_addresses.append(address)
 
@@ -284,7 +329,7 @@ class QuarkIpam(object):
                                           segment_id, subnet_ids=subnets)]
 
         ips = self._allocate_ips_from_subnets(context, net_id, subnets,
-                                              ip_address, **kwargs)
+                                              port_id, ip_address, **kwargs)
         new_addresses.extend(ips)
 
         self._notify_new_addresses(context, new_addresses)
