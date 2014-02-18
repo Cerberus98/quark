@@ -18,6 +18,7 @@ Quark Pluggable IPAM
 """
 
 import random
+import uuid
 
 import netaddr
 from neutron.common import exceptions
@@ -57,7 +58,7 @@ def rfc2462_ip(mac, cidr):
 
 
 def rfc3041_ip(port_id, cidr):
-    random.seed(port_id.int())
+    random.seed(int(uuid.UUID(port_id)))
     int_val = netaddr.IPNetwork(cidr).value
     while True:
         val = int_val + random.getrandbits(64)
