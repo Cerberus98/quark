@@ -70,7 +70,7 @@ def rfc3041_ip(port_id, cidr):
 
 
 def generate_v6(mac, port_id, cidr):
-    yield rfc2462_ip(mac, cidr)
+    #yield rfc2462_ip(mac, cidr)
     for addr in rfc3041_ip(port_id, cidr):
         yield addr
 
@@ -244,8 +244,9 @@ class QuarkIpam(object):
                                               ip_address, **kwargs)
         else:
             ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
-            for tries, ip_address in enumerate(generate_v6(
-                kwargs["mac_address"]["address"], port_id, subnet["cidr"])):
+            for tries, ip_address in enumerate(
+                generate_v6(kwargs["mac_address"]["address"], port_id,
+                            subnet["cidr"])):
                 if tries > CONF.QUARK.v6_allocation_attempts:
                     raise exceptions.IpAddressGenerationFailure(
                         net_id=net_id)

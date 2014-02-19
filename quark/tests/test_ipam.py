@@ -1000,4 +1000,5 @@ class QuarkIpamTestRFC2462IpGeneration(QuarkIpamBaseTest):
         mac = netaddr.EUI("AA:BB:CC:DD:EE:FF")
         cidr = "fe80::/120"
         ip = quark.ipam.rfc2462_ip(mac, cidr)
-        self.assertEqual(ip, netaddr.IPAddress('fe80::a8bb:ccff:fedd:eeff'))
+        self.assertEqual(ip,
+                         netaddr.IPAddress('fe80::a8bb:ccff:fedd:eeff').value)
