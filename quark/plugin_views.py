@@ -85,7 +85,7 @@ def _make_subnet_dict(subnet, default_route=None, fields=None):
            "tenant_id": subnet.get("tenant_id"),
            "network_id": net_id,
            "ip_version": subnet.get("ip_version"),
-           "allocation_pools": _allocation_pools(subnet),
+           "allocation_pools": [], #_allocation_pools(subnet),
            "dns_nameservers": dns_nameservers or [],
            "cidr": subnet.get("cidr"),
            "shared": STRATEGY.is_parent_network(net_id),

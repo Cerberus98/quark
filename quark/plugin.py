@@ -34,6 +34,7 @@ from quark.plugin_modules import ports
 from quark.plugin_modules import routes
 from quark.plugin_modules import security_groups
 from quark.plugin_modules import subnets
+from quark import utils
 
 LOG = logging.getLogger(__name__)
 
@@ -106,25 +107,30 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
             context.tenant_id = resource["tenant_id"]
 
     @sessioned
+    @utils.timed
     def get_mac_address_range(self, context, id, fields=None):
         return mac_address_ranges.get_mac_address_range(context, id, fields)
 
     @sessioned
+    @utils.timed
     def get_mac_address_ranges(self, context):
         return mac_address_ranges.get_mac_address_ranges(context)
 
     @sessioned
+    @utils.timed
     def create_mac_address_range(self, context, mac_range):
         self._fix_missing_tenant_id(context, mac_range["mac_address_range"])
         return mac_address_ranges.create_mac_address_range(context, mac_range)
 
     @sessioned
+    @utils.timed
     def delete_mac_address_range(self, context, id):
         mac_address_ranges.delete_mac_address_range(context, id)
 
     #TODO(dietz/perkins): passing in net_driver as a stopgap,
     #XXX DO NOT DEPLOY!! XXX see redmine #2487
     @sessioned
+    @utils.timed
     def create_security_group(self, context, security_group, net_driver):
         self._fix_missing_tenant_id(context, security_group["security_group"])
         return security_groups.create_security_group(context, security_group,
@@ -133,6 +139,7 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
     #TODO(dietz/perkins): passing in net_driver as a stopgap,
     #XXX DO NOT DEPLOY!! XXX see redmine #2487
     @sessioned
+    @utils.timed
     def create_security_group_rule(self, context, security_group,
                                    security_group_rule, net_driver):
         self._fix_missing_tenant_id(context, security_group["security_group"])
@@ -143,24 +150,29 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
     #TODO(dietz/perkins): passing in net_driver as a stopgap,
     #XXX DO NOT DEPLOY!! XXX see redmine #2487
     @sessioned
+    @utils.timed
     def delete_security_group(self, context, id, net_driver):
         security_groups.delete_security_group(context, id, net_driver)
 
     #TODO(dietz/perkins): passing in net_driver as a stopgap,
     #XXX DO NOT DEPLOY!! XXX see redmine #2487
     @sessioned
+    @utils.timed
     def delete_security_group_rule(self, context, id, net_driver):
         security_groups.delete_security_group_rule(context, id, net_driver)
 
     @sessioned
+    @utils.timed
     def get_security_group(self, context, id, fields=None):
         return security_groups.get_security_group(context, id, fields)
 
     @sessioned
+    @utils.timed
     def get_security_group_rule(self, context, id, fields=None):
         return security_groups.get_security_group_rule(context, id, fields)
 
     @sessioned
+    @utils.timed
     def get_security_groups(self, context, filters=None, fields=None,
                             sorts=None, limit=None, marker=None,
                             page_reverse=False):
@@ -169,6 +181,7 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
                                                    page_reverse)
 
     @sessioned
+    @utils.timed
     def get_security_group_rules(self, context, filters=None, fields=None,
                                  sorts=None, limit=None, marker=None,
                                  page_reverse=False):
@@ -179,158 +192,195 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
     #TODO(dietz/perkins): passing in net_driver as a stopgap,
     #XXX DO NOT DEPLOY!! XXX see redmine #2487
     @sessioned
+    @utils.timed
     def update_security_group(self, context, id, security_group, net_driver):
         return security_groups.update_security_group(context, id,
                                                      security_group,
                                                      net_driver)
 
     @sessioned
+    @utils.timed
     def create_ip_policy(self, context, ip_policy):
         self._fix_missing_tenant_id(context, ip_policy["ip_policy"])
         return ip_policies.create_ip_policy(context, ip_policy)
 
     @sessioned
+    @utils.timed
     def get_ip_policy(self, context, id):
         return ip_policies.get_ip_policy(context, id)
 
     @sessioned
+    @utils.timed
     def get_ip_policies(self, context, **filters):
         return ip_policies.get_ip_policies(context, **filters)
 
     @sessioned
+    @utils.timed
     def update_ip_policy(self, context, id, ip_policy):
         return ip_policies.update_ip_policy(context, id, ip_policy)
 
     @sessioned
+    @utils.timed
     def delete_ip_policy(self, context, id):
         return ip_policies.delete_ip_policy(context, id)
 
     @sessioned
+    @utils.timed
     def get_ip_addresses(self, context, **filters):
         return ip_addresses.get_ip_addresses(context, **filters)
 
     @sessioned
+    @utils.timed
     def get_ip_address(self, context, id):
         return ip_addresses.get_ip_address(context, id)
 
     @sessioned
+    @utils.timed
     def create_ip_address(self, context, ip_address):
         self._fix_missing_tenant_id(context, ip_address["ip_address"])
         return ip_addresses.create_ip_address(context, ip_address)
 
     @sessioned
+    @utils.timed
     def update_ip_address(self, context, id, ip_address):
         return ip_addresses.update_ip_address(context, id, ip_address)
 
     @sessioned
+    @utils.timed
     def create_port(self, context, port):
         self._fix_missing_tenant_id(context, port["port"])
         return ports.create_port(context, port)
 
     @sessioned
+    @utils.timed
     def post_update_port(self, context, id, port):
         return ports.post_update_port(context, id, port)
 
     @sessioned
+    @utils.timed
     def get_port(self, context, id, fields=None):
         return ports.get_port(context, id, fields)
 
     @sessioned
+    @utils.timed
     def update_port(self, context, id, port):
         return ports.update_port(context, id, port)
 
     @sessioned
+    @utils.timed
     def get_ports(self, context, filters=None, fields=None):
         return ports.get_ports(context, filters, fields)
 
     @sessioned
+    @utils.timed
     def get_ports_count(self, context, filters=None):
         return ports.get_ports_count(context, filters)
 
     @sessioned
+    @utils.timed
     def delete_port(self, context, id):
         return ports.delete_port(context, id)
 
     @sessioned
+    @utils.timed
     def disassociate_port(self, context, id, ip_address_id):
         return ports.disassociate_port(context, id, ip_address_id)
 
     @sessioned
+    @utils.timed
     def diagnose_port(self, context, id, fields):
         return ports.diagnose_port(context, id, fields)
 
     @sessioned
+    @utils.timed
     def get_route(self, context, id):
         return routes.get_route(context, id)
 
     @sessioned
+    @utils.timed
     def get_routes(self, context):
         return routes.get_routes(context)
 
     @sessioned
+    @utils.timed
     def create_route(self, context, route):
         self._fix_missing_tenant_id(context, route["route"])
         return routes.create_route(context, route)
 
     @sessioned
+    @utils.timed
     def delete_route(self, context, id):
         routes.delete_route(context, id)
 
     @sessioned
+    @utils.timed
     def create_subnet(self, context, subnet):
         self._fix_missing_tenant_id(context, subnet["subnet"])
         return subnets.create_subnet(context, subnet)
 
     @sessioned
+    @utils.timed
     def update_subnet(self, context, id, subnet):
         return subnets.update_subnet(context, id, subnet)
 
     @sessioned
+    @utils.timed
     def get_subnet(self, context, id, fields=None):
         return subnets.get_subnet(context, id, fields)
 
     @sessioned
+    @utils.timed
     def get_subnets(self, context, filters=None, fields=None):
         return subnets.get_subnets(context, filters, fields)
 
     @sessioned
+    @utils.timed
     def get_subnets_count(self, context, filters=None):
         return subnets.get_subnets_count(context, filters)
 
     @sessioned
+    @utils.timed
     def delete_subnet(self, context, id):
         return subnets.delete_subnet(context, id)
 
     @sessioned
+    @utils.timed
     def diagnose_subnet(self, context, id, fields):
         return subnets.diagnose_subnet(context, id, fields)
 
     @sessioned
+    @utils.timed
     def create_network(self, context, network):
         self._fix_missing_tenant_id(context, network["network"])
         return networks.create_network(context, network)
 
     @sessioned
+    @utils.timed
     def update_network(self, context, id, network):
         return networks.update_network(context, id, network)
 
     @sessioned
+    @utils.timed
     def get_network(self, context, id, fields=None):
         return networks.get_network(context, id, fields)
 
     @sessioned
+    @utils.timed
     def get_networks(self, context, filters=None, fields=None):
         return networks.get_networks(context, filters, fields)
 
     @sessioned
+    @utils.timed
     def get_networks_count(self, context, filters=None):
         return networks.get_networks_count(context, filters)
 
     @sessioned
+    @utils.timed
     def delete_network(self, context, id):
         return networks.delete_network(context, id)
 
     @sessioned
+    @utils.timed
     def diagnose_network(self, context, id, fields):
         return networks.diagnose_network(context, id, fields)
 
