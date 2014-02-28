@@ -43,7 +43,7 @@ def _make_network_dict(network, fields=None):
            #TODO(mdietz): this is the expected return. Then the client
            #              foolishly turns around and asks for the entire
            #              subnet list anyway! Plz2fix
-           "subnets": [s["id"] for s in network.get("subnets", [])]}
+           "subnets": [s["id"] for s in network.subnets]}
     return res
 
 

@@ -234,7 +234,7 @@ class Subnet(BASEV2, models.HasId, IsHazTags):
         DNSNameserver,
         primaryjoin="DNSNameserver.subnet_id==Subnet.id",
         backref='subnet',
-        cascade='delete', lazy="joined")
+        cascade='delete')
     ip_policy_id = sa.Column(sa.String(36),
                              sa.ForeignKey("quark_ip_policy.id"))
     # Legacy data
@@ -320,7 +320,7 @@ class Port(BASEV2, models.HasTenant, models.HasId):
         return orm.relationship(SecurityGroup, primaryjoin=primaryjoin,
                                 secondaryjoin=secondaryjoin,
                                 secondary=port_group_association_table,
-                                backref="ports", lazy="joined")
+                                backref="ports")
 
 # Indices tailored specifically to get_instance_nw_info calls from nova
 sa.Index("idx_ports_1", Port.__table__.c.device_id, Port.__table__.c.tenant_id)
@@ -409,7 +409,7 @@ class Network(BASEV2, models.HasId):
     __tablename__ = "quark_networks"
     name = sa.Column(sa.String(255))
     ports = orm.relationship(Port, backref='network')
-    subnets = orm.relationship(Subnet, backref='network', lazy="joined")
+    subnets = orm.relationship(Subnet, backref='network')
     ip_policy_id = sa.Column(sa.String(36),
                              sa.ForeignKey("quark_ip_policy.id"))
     network_plugin = sa.Column(sa.String(36))
