@@ -16,7 +16,10 @@
 
 import cProfile as profiler
 import gc
-import pstats
+try:
+    import pstats
+except:
+    pass
 import sys
 import time
 
