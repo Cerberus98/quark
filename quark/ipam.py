@@ -40,7 +40,11 @@ quark_opts = [
                help=_('Number of times to retry generating v6 addresses'
                       ' before failure. Also implicitly controls how many'
                       ' v6 addresses we assign to any port, as the random'
-                      ' values generated will be the same every time.'))
+                      ' values generated will be the same every time.')),
+    cfg.IntOpt("ipam_retries",
+               default=10,
+               help=_("Number of times to retry allocating IPs or MACs"
+                      " from a given subnet or MAC range before giving up."))
 ]
 
 CONF.register_opts(quark_opts, "QUARK")
@@ -82,38 +86,50 @@ class QuarkIpam(object):
         if mac_address:
             mac_address = netaddr.EUI(mac_address).value
 
-        deallocated_mac = db_api.mac_address_find(
-            context, lock_mode=True, reuse_after=reuse_after,
-            scope=db_api.ONE, address=mac_address)
-        if deallocated_mac:
-            return db_api.mac_address_update(
-                context, deallocated_mac, deallocated=False,
-                deallocated_at=None)
-
-        ranges = db_api.mac_address_range_find_allocation_counts(
-            context, address=mac_address)
-        for result in ranges:
-            rng, addr_count = result
-            last = rng["last_address"]
-            first = rng["first_address"]
-            if last - first <= addr_count:
+        for retry in xrange(CONF.QUARK.ipam_retries):
+            try:
+                deallocated_mac = db_api.mac_address_find(
+                    context, lock_mode=True, reuse_after=reuse_after,
+                    scope=db_api.ONE, address=mac_address)
+                if deallocated_mac:
+                    return db_api.mac_address_update(
+                        context, deallocated_mac, deallocated=False,
+                        deallocated_at=None)
+                break
+            except Exception:
+                LOG.exception("Error in allocate_mac_address")
                 continue
-            next_address = None
-            if mac_address:
-                next_address = mac_address
-            else:
-                address = True
-                while address:
-                    next_address = rng["next_auto_assign_mac"]
-                    rng["next_auto_assign_mac"] = next_address + 1
-                    address = db_api.mac_address_find(
-                        context, tenant_id=context.tenant_id,
-                        scope=db_api.ONE, address=next_address)
 
-            address = db_api.mac_address_create(
-                context, address=next_address,
-                mac_address_range_id=rng["id"])
-            return address
+        for retry in xrange(CONF.QUARK.ipam_retries):
+            try:
+                ranges = db_api.mac_address_range_find_allocation_counts(
+                    context, address=mac_address)
+
+                rng, addr_count = ranges
+                #last = rng["last_address"]
+                #first = rng["first_address"]
+                #if last - first <= addr_count:
+                #    continue
+                next_address = None
+                if mac_address:
+                    next_address = mac_address
+                else:
+                    address = True
+                    while address:
+                        next_address = rng["next_auto_assign_mac"]
+                        rng["next_auto_assign_mac"] = next_address + 1
+                        address = db_api.mac_address_find(
+                            context, tenant_id=context.tenant_id,
+                            scope=db_api.ONE, address=next_address)
+
+                address = db_api.mac_address_create(
+                    context, address=next_address,
+                    mac_address_range_id=rng["id"])
+                return address
+
+            except Exception:
+                LOG.exception("Error in allocate_mac_address")
+                continue
 
         raise exceptions.MacAddressGenerationFailure(net_id=net_id)
 
@@ -392,10 +408,11 @@ class QuarkIpam(object):
                                                        scope=db_api.ALL,
                                                        subnet_id=subnet_ids,
                                                        **filters)
-        for subnet, ips_in_subnet in subnets:
+        subnet, ips_in_subnet = subnets
+        if subnet:
             ipnet = netaddr.IPNetwork(subnet["cidr"])
-            if ip_address and ip_address not in ipnet:
-                continue
+            #if ip_address and ip_address not in ipnet:
+            #    continue
             ip_policy_cidrs = None
             if not ip_address:
                 ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)

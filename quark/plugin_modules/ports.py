@@ -104,12 +104,13 @@ def create_port(context, port):
         @cmd_mgr.undo
         def _allocate_ips_undo(addresses):
             LOG.info("Rolling back IP addresses...")
-            for address in addresses:
-                try:
-                    with context.session.begin():
-                        ipam_driver.deallocate_ip_address(context, address)
-                except Exception:
-                    LOG.exception("Couldn't release IP %s" % address)
+            if addresses:
+                for address in addresses:
+                    try:
+                        with context.session.begin():
+                            ipam_driver.deallocate_ip_address(context, address)
+                    except Exception:
+                        LOG.exception("Couldn't release IP %s" % address)
 
         @cmd_mgr.do
         def _allocate_mac(net, port_id, mac_address):

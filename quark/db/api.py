@@ -229,14 +229,14 @@ def ip_address_create(context, **address_dict):
 @scoped
 def ip_address_find(context, lock_mode=False, **filters):
     query = context.session.query(models.IPAddress)
+    if lock_mode:
+        query = query.with_lockmode("update")
 
     ip_shared = filters.pop("shared", None)
     if ip_shared is not None:
         cnt = sql_func.count(models.port_ip_association_table.c.port_id)
         stmt = context.session.query(models.IPAddress,
                                      cnt.label("ports_count"))
-        if lock_mode:
-            stmt = stmt.with_lockmode("update")
         stmt = stmt.outerjoin(models.port_ip_association_table)
         stmt = stmt.group_by(models.IPAddress.id).subquery()
 
@@ -268,19 +268,21 @@ def mac_address_find(context, lock_mode=False, **filters):
 def mac_address_range_find_allocation_counts(context, address=None):
     query = context.session.query(models.MacAddressRange,
                                   sql_func.count(models.MacAddress.address).
-                                  label("count")).with_lockmode("update")
+                                  label("count"))  # .with_lockmode("update")
     query = query.outerjoin(models.MacAddress)
     query = query.group_by(models.MacAddressRange.id)
     query = query.order_by("count DESC")
     if address:
         query = query.filter(models.MacAddressRange.last_address >= address)
         query = query.filter(models.MacAddressRange.first_address <= address)
-    return query
+    return query.first()
 
 
 @scoped
-def mac_address_range_find(context, **filters):
+def mac_address_range_find(context, lock_mode=False, **filters):
     query = context.session.query(models.MacAddressRange)
+    if lock_mode:
+        query = query.with_lockmode("update")
     model_filters = _model_query(context, models.MacAddressRange, filters)
     return query.filter(*model_filters)
 
@@ -398,7 +400,7 @@ def subnet_find_allocation_counts(context, net_id, **filters):
     if "subnet_id" in filters and filters["subnet_id"]:
         query = query.filter(models.Subnet.id.in_(filters["subnet_id"]))
 
-    return query
+    return query.first()
 
 
 @scoped
