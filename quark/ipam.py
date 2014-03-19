@@ -98,41 +98,45 @@ class QuarkIpam(object):
         r = random.randint(0, 9999999)
         for result in ranges:
 
+            LOG.critical("%s - %s" % (r, "A" * 80))
+            LOG.critical("Starting transaction %s !!!!!!!!!" % r)
             for retry in xrange(20):
-                LOG.critical("%s - %s" % (r, "A" * 80))
-                LOG.critical("Starting transaction %s !!!!!!!!!" % r)
-                with context.session.begin():
-                # This could be stale under load, but that's ok
-                    rng, addr_count = result
-                    LOG.critical("%s - ID: %s" % (r, rng["id"]))
-                    LOG.critical("%s - Auto Assign: %s" % (r,
-                        rng["next_auto_assign_mac"]))
-                    mr = db_api.mac_address_range_find(context,
-                                                       id=rng["id"],
-                                                       lock_mode=True,
-                                                       scope=db_api.ONE)
-                    last = rng["last_address"]
-                    first = rng["first_address"]
-                    if last - first <= addr_count:
-                        break
+                try:
+                    with context.session.begin():
+                    # This could be stale under load, but that's ok
+                        rng, addr_count = result
+                        LOG.critical("%s - ID: %s" % (r, rng["id"]))
+                        LOG.critical("%s - Auto Assign: %s" % (r,
+                            rng["next_auto_assign_mac"]))
+                        mr = db_api.mac_address_range_find(context,
+                                                           id=rng["id"],
+                                                           lock_mode=True,
+                                                           scope=db_api.ONE)
+                        last = rng["last_address"]
+                        first = rng["first_address"]
+                        if last - first <= addr_count:
+                            break
 
-                    next_address = None
-                    if mac_address:
-                        next_address = mac_address
-                    else:
-                        next_address = mr["next_auto_assign_mac"]
-                        LOG.critical("%s - Next Address: %s" % (r,
-                            next_address))
-                        mr["next_auto_assign_mac"] = next_address + 1
-                        LOG.critical("%s - Updated: %s" % (r,
-                            mr["next_auto_assign_mac"]))
-                        context.session.add(mr)
-                        LOG.critical("%s - %s" % (r, "A" * 80))
+                        next_address = None
+                        if mac_address:
+                            next_address = mac_address
+                        else:
+                            next_address = mr["next_auto_assign_mac"]
+                            LOG.critical("%s - Next Address: %s" % (r,
+                                next_address))
+                            mr["next_auto_assign_mac"] = next_address + 1
+                            LOG.critical("%s - Updated: %s" % (r,
+                                mr["next_auto_assign_mac"]))
+                            context.session.add(mr)
+                            LOG.critical("%s - %s" % (r, "A" * 80))
 
-                    address = db_api.mac_address_create(
-                        context, address=next_address,
-                        mac_address_range_id=mr["id"])
-                    return address
+                        address = db_api.mac_address_create(
+                            context, address=next_address,
+                            mac_address_range_id=mr["id"])
+                        return address
+                except Exception:
+                    LOG.exception()
+                    continue
 
         raise exceptions.MacAddressGenerationFailure(net_id=net_id)
 
