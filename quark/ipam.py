@@ -94,11 +94,18 @@ class QuarkIpam(object):
         ranges = db_api.mac_address_range_find_allocation_counts(
             context, address=mac_address)
 
+        import random
+        r = random.randint(0, 9999999)
         for result in ranges:
 
+            LOG.critical("%s - %s" % (r, "A" * 80))
+            LOG.critical("Starting transaction %s !!!!!!!!!" % r)
             with context.session.begin():
             # This could be stale under load, but that's ok
                 rng, addr_count = result
+                LOG.critical("%s - ID: %s" % (r, rng["id"]))
+                LOG.critical("%s - Auto Assign: %s" % (r,
+                    rng["next_auto_assign_mac"]))
                 mr = db_api.mac_address_range_find(context,
                                                    id=rng["id"],
                                                    lock_mode=True,
@@ -113,8 +120,12 @@ class QuarkIpam(object):
                     next_address = mac_address
                 else:
                     next_address = mr["next_auto_assign_mac"]
+                    LOG.critical("%s - Next Address: %s" % (r, next_address))
                     mr["next_auto_assign_mac"] = next_address + 1
+                    LOG.critical("%s - Updated: %s" % (r,
+                        mr["next_auto_assign_mac"]))
                     context.session.add(mr)
+                    LOG.critical("%s - %s" % (r, "A" * 80))
 
                 address = db_api.mac_address_create(
                     context, address=next_address,
