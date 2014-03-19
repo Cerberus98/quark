@@ -95,29 +95,30 @@ class QuarkIpam(object):
             context, address=mac_address)
 
         for result in ranges:
-            rng, addr_count = result
-            last = rng["last_address"]
-            first = rng["first_address"]
-            if last - first <= addr_count:
-                continue
 
             with context.session.begin():
-                rng = db_api.mac_address_range_find(context,
-                                                    id=rng["id"],
-                                                    lock_mode=True,
-                                                    scope=db_api.ONE)
+            # This could be stale under load, but that's ok
+                rng, addr_count = result
+                mr = db_api.mac_address_range_find(context,
+                                                   id=rng["id"],
+                                                   lock_mode=True,
+                                                   scope=db_api.ONE)
+                last = rng["last_address"]
+                first = rng["first_address"]
+                if last - first <= addr_count:
+                    continue
 
                 next_address = None
                 if mac_address:
                     next_address = mac_address
                 else:
-                    next_address = rng["next_auto_assign_mac"]
-                    rng["next_auto_assign_mac"] = next_address + 1
-                    context.session.add(rng)
+                    next_address = mr["next_auto_assign_mac"]
+                    mr["next_auto_assign_mac"] = next_address + 1
+                    context.session.add(mr)
 
                 address = db_api.mac_address_create(
                     context, address=next_address,
-                    mac_address_range_id=rng["id"])
+                    mac_address_range_id=mr["id"])
                 return address
 
         raise exceptions.MacAddressGenerationFailure(net_id=net_id)
