@@ -82,38 +82,43 @@ class QuarkIpam(object):
         if mac_address:
             mac_address = netaddr.EUI(mac_address).value
 
-        deallocated_mac = db_api.mac_address_find(
-            context, lock_mode=True, reuse_after=reuse_after,
-            scope=db_api.ONE, address=mac_address)
-        if deallocated_mac:
-            return db_api.mac_address_update(
-                context, deallocated_mac, deallocated=False,
-                deallocated_at=None)
+        with context.session.begin():
+            deallocated_mac = db_api.mac_address_find(
+                context, lock_mode=True, reuse_after=reuse_after,
+                scope=db_api.ONE, address=mac_address)
+            if deallocated_mac:
+                return db_api.mac_address_update(
+                    context, deallocated_mac, deallocated=False,
+                    deallocated_at=None)
 
         ranges = db_api.mac_address_range_find_allocation_counts(
             context, address=mac_address)
+
         for result in ranges:
             rng, addr_count = result
             last = rng["last_address"]
             first = rng["first_address"]
             if last - first <= addr_count:
                 continue
-            next_address = None
-            if mac_address:
-                next_address = mac_address
-            else:
-                address = True
-                while address:
+
+            with context.session.begin():
+                rng = db_api.mac_address_range_find(context,
+                                                    id=rng["id"],
+                                                    lock_mode=True,
+                                                    scope=db_api.ONE)
+
+                next_address = None
+                if mac_address:
+                    next_address = mac_address
+                else:
                     next_address = rng["next_auto_assign_mac"]
                     rng["next_auto_assign_mac"] = next_address + 1
-                    address = db_api.mac_address_find(
-                        context, tenant_id=context.tenant_id,
-                        scope=db_api.ONE, address=next_address)
+                    context.session.add(rng)
 
-            address = db_api.mac_address_create(
-                context, address=next_address,
-                mac_address_range_id=rng["id"])
-            return address
+                address = db_api.mac_address_create(
+                    context, address=next_address,
+                    mac_address_range_id=rng["id"])
+                return address
 
         raise exceptions.MacAddressGenerationFailure(net_id=net_id)
 

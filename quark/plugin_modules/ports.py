@@ -113,10 +113,9 @@ def create_port(context, port):
 
         @cmd_mgr.do
         def _allocate_mac(net, port_id, mac_address):
-            with context.session.begin():
-                mac = ipam_driver.allocate_mac_address(
-                    context, net["id"], port_id, CONF.QUARK.ipam_reuse_after,
-                    mac_address=mac_address)
+            mac = ipam_driver.allocate_mac_address(
+                context, net["id"], port_id, CONF.QUARK.ipam_reuse_after,
+                mac_address=mac_address)
             return mac
 
         @cmd_mgr.undo
