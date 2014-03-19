@@ -105,6 +105,8 @@ class QuarkIpam(object):
                     with context.session.begin():
                     # This could be stale under load, but that's ok
                         rng, addr_count = result
+                        context.session.expunge(rng)
+                        LOG.critical("%s - Range ID: %s" % (r, rng))
                         LOG.critical("%s - ID: %s" % (r, rng["id"]))
                         LOG.critical("%s - Auto Assign: %s" % (r,
                             rng["next_auto_assign_mac"]))
@@ -112,6 +114,9 @@ class QuarkIpam(object):
                                                            id=rng["id"],
                                                            lock_mode=True,
                                                            scope=db_api.ONE)
+
+                        LOG.critical("%s - MR ID: %s" % (r, mr))
+
                         last = rng["last_address"]
                         first = rng["first_address"]
                         if last - first <= addr_count:
@@ -130,12 +135,13 @@ class QuarkIpam(object):
                             context.session.add(mr)
                             LOG.critical("%s - %s" % (r, "A" * 80))
 
+                    with context.session.begin():
                         address = db_api.mac_address_create(
                             context, address=next_address,
                             mac_address_range_id=mr["id"])
                         return address
                 except Exception:
-                    LOG.exception()
+                    LOG.exception("Error in allocate_mac")
                     continue
 
         raise exceptions.MacAddressGenerationFailure(net_id=net_id)
