@@ -275,8 +275,7 @@ def mac_address_range_find_allocation_counts(context, address=None):
     if address:
         query = query.filter(models.MacAddressRange.last_address >= address)
         query = query.filter(models.MacAddressRange.first_address <= address)
-    query = query.filter(models.MacAddressRange.next_auto_assign_mac <
-                         models.MacAddressRange.last_address)
+    query = query.filter(models.MacAddressRange.next_auto_assign_mac != -1)
     query = query.limit(1)
     return query.first()
 
@@ -402,7 +401,7 @@ def subnet_find_allocation_counts(context, net_id, **filters):
         query = query.filter(models.Subnet.segment_id == filters["segment_id"])
     if "subnet_id" in filters and filters["subnet_id"]:
         query = query.filter(models.Subnet.id.in_(filters["subnet_id"]))
-
+    query = query.filter(models.Subnet.next_auto_assign_ip != -1)
     return query
 
 

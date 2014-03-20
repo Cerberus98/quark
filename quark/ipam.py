@@ -44,6 +44,10 @@ quark_opts = [
     cfg.IntOpt("mac_address_retry_max",
                default=20,
                help=_("Number of times to attempt to allocate a new MAC"
+                      " address before giving up.")),
+    cfg.IntOpt("ip_address_retry_max",
+               default=20,
+               help=_("Number of times to attempt to allocate a new IP"
                       " address before giving up."))
 ]
 
@@ -105,28 +109,20 @@ class QuarkIpam(object):
                 mac_range = db_api.mac_address_range_find_allocation_counts(
                     context, address=mac_address)
 
+                if not mac_range:
+                    break
+
                 try:
-                    # This could be stale under load, but that's ok
                     rng, addr_count = mac_range
-
-                    # Without this, a query by primary key on a session
-                    # returns the same range object from the count
-                    # query above!
-                    #context.session.expunge(rng)
-
-                    #mr = db_api.mac_address_range_find(context,
-                    #                                   id=rng["id"],
-                    #                                   lock_mode=True,
-                    #                                   scope=db_api.ONE)
 
                     last = rng["last_address"]
                     first = rng["first_address"]
-                    if last - first <= addr_count:
+                    if (last - first + 1) <= addr_count:
                         # Somehow, the range got filled up without us
                         # knowing, so set the next_auto_assign to be the
-                        # last address so we never try to create new ones
+                        # last address + 1 so we never try to create new ones
                         # in this range
-                        rng["next_auto_assign_mac"] = rng["last_address"]
+                        rng["next_auto_assign_mac"] = -1
                         context.session.add(rng)
                         continue
 
@@ -135,6 +131,8 @@ class QuarkIpam(object):
                     else:
                         next_address = rng["next_auto_assign_mac"]
                         rng["next_auto_assign_mac"] = next_address + 1
+                        if rng["next_auto_assign_mac"] > last:
+                            rng["next_auto_assign_mac"] = -1
                         context.session.add(rng)
 
                 except Exception:
@@ -151,7 +149,7 @@ class QuarkIpam(object):
                         mac_address_range_id=rng["id"])
                     return address
             except Exception:
-                LOG.exception("Error in creating mac")
+                LOG.exception("Error in creating mac. MAC likely duplicate")
                 continue
 
         raise exceptions.MacAddressGenerationFailure(net_id=net_id)
@@ -195,24 +193,25 @@ class QuarkIpam(object):
         if sub_ids:
             ip_kwargs["subnet_id"] = sub_ids
 
-        address = db_api.ip_address_find(elevated, **ip_kwargs)
+        with context.session.begin():
+            address = db_api.ip_address_find(elevated, **ip_kwargs)
 
-        if address:
-            #NOTE(mdietz): We should always be in the CIDR but we've
-            #              also said that before :-/
-            if address.get("subnet"):
-                cidr = netaddr.IPNetwork(address["subnet"]["cidr"])
-                addr = netaddr.IPAddress(int(address["address"]),
-                                         version=int(cidr.version))
-                if addr in cidr:
-                    updated_address = db_api.ip_address_update(
-                        elevated, address, deallocated=False,
-                        deallocated_at=None,
-                        allocated_at=timeutils.utcnow())
-                    return [updated_address]
-                else:
-                    # Make sure we never find it again
-                    context.session.delete(address)
+            if address:
+                #NOTE(mdietz): We should always be in the CIDR but we've
+                #              also said that before :-/
+                if address.get("subnet"):
+                    cidr = netaddr.IPNetwork(address["subnet"]["cidr"])
+                    addr = netaddr.IPAddress(int(address["address"]),
+                                             version=int(cidr.version))
+                    if addr in cidr:
+                        updated_address = db_api.ip_address_update(
+                            elevated, address, deallocated=False,
+                            deallocated_at=None,
+                            allocated_at=timeutils.utcnow())
+                        return [updated_address]
+                    else:
+                        # Make sure we never find it again
+                        context.session.delete(address)
         return []
 
     def is_strategy_satisfied(self, ip_addresses):
