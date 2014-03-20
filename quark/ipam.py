@@ -40,7 +40,11 @@ quark_opts = [
                help=_('Number of times to retry generating v6 addresses'
                       ' before failure. Also implicitly controls how many'
                       ' v6 addresses we assign to any port, as the random'
-                      ' values generated will be the same every time.'))
+                      ' values generated will be the same every time.')),
+    cfg.IntOpt("mac_address_retry_max",
+               default=20,
+               help=_("Number of times to attempt to allocate a new MAC"
+                      " address before giving up."))
 ]
 
 CONF.register_opts(quark_opts, "QUARK")
@@ -91,58 +95,64 @@ class QuarkIpam(object):
                     context, deallocated_mac, deallocated=False,
                     deallocated_at=None)
 
-        ranges = db_api.mac_address_range_find_allocation_counts(
-            context, address=mac_address)
+        # This could fail if a large chunk of MACs were chosen explicitly,
+        # but under concurrent load enough MAC creates should iterate without
+        # any given thread exhausting its retry count.
+        for retry in xrange(cfg.CONF.QUARK.mac_address_retry_max):
 
-        import random
-        r = random.randint(0, 9999999)
-        for result in ranges:
+            next_address = None
+            with context.session.begin():
+                mac_range = db_api.mac_address_range_find_allocation_counts(
+                    context, address=mac_address)
 
-            LOG.critical("%s - %s" % (r, "A" * 80))
-            LOG.critical("Starting transaction %s !!!!!!!!!" % r)
-            for retry in xrange(20):
                 try:
-                    with context.session.begin():
                     # This could be stale under load, but that's ok
-                        rng, addr_count = result
-                        context.session.expunge(rng)
-                        LOG.critical("%s - Range ID: %s" % (r, rng))
-                        LOG.critical("%s - ID: %s" % (r, rng["id"]))
-                        LOG.critical("%s - Auto Assign: %s" % (r,
-                            rng["next_auto_assign_mac"]))
-                        mr = db_api.mac_address_range_find(context,
-                                                           id=rng["id"],
-                                                           lock_mode=True,
-                                                           scope=db_api.ONE)
+                    rng, addr_count = mac_range
 
-                        LOG.critical("%s - MR ID: %s" % (r, mr))
+                    # Without this, a query by primary key on a session
+                    # returns the same range object from the count
+                    # query above!
+                    #context.session.expunge(rng)
 
-                        last = rng["last_address"]
-                        first = rng["first_address"]
-                        if last - first <= addr_count:
-                            break
+                    #mr = db_api.mac_address_range_find(context,
+                    #                                   id=rng["id"],
+                    #                                   lock_mode=True,
+                    #                                   scope=db_api.ONE)
 
-                        next_address = None
-                        if mac_address:
-                            next_address = mac_address
-                        else:
-                            next_address = mr["next_auto_assign_mac"]
-                            LOG.critical("%s - Next Address: %s" % (r,
-                                next_address))
-                            mr["next_auto_assign_mac"] = next_address + 1
-                            LOG.critical("%s - Updated: %s" % (r,
-                                mr["next_auto_assign_mac"]))
-                            context.session.add(mr)
-                            LOG.critical("%s - %s" % (r, "A" * 80))
+                    last = rng["last_address"]
+                    first = rng["first_address"]
+                    if last - first <= addr_count:
+                        # Somehow, the range got filled up without us
+                        # knowing, so set the next_auto_assign to be the
+                        # last address so we never try to create new ones
+                        # in this range
+                        rng["next_auto_assign_mac"] = rng["last_address"]
+                        context.session.add(rng)
+                        continue
 
-                    with context.session.begin():
-                        address = db_api.mac_address_create(
-                            context, address=next_address,
-                            mac_address_range_id=mr["id"])
-                        return address
+                    if mac_address:
+                        next_address = mac_address
+                    else:
+                        next_address = rng["next_auto_assign_mac"]
+                        rng["next_auto_assign_mac"] = next_address + 1
+                        context.session.add(rng)
+
                 except Exception:
-                    LOG.exception("Error in allocate_mac")
+                    LOG.exception("Error in updating mac range")
                     continue
+
+            # Based on the above, this should only fail if a MAC was
+            # was explicitly chosen at some point. As such, fall through
+            # here and get in line for a new MAC address to try
+            try:
+                with context.session.begin():
+                    address = db_api.mac_address_create(
+                        context, address=next_address,
+                        mac_address_range_id=rng["id"])
+                    return address
+            except Exception:
+                LOG.exception("Error in creating mac")
+                continue
 
         raise exceptions.MacAddressGenerationFailure(net_id=net_id)
 
