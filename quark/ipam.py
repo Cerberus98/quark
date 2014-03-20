@@ -130,10 +130,11 @@ class QuarkIpam(object):
                         next_address = mac_address
                     else:
                         next_address = rng["next_auto_assign_mac"]
-                        rng["next_auto_assign_mac"] = next_address + 1
-                        if rng["next_auto_assign_mac"] > last:
-                            rng["next_auto_assign_mac"] = -1
-                        context.session.add(rng)
+                        next_auto = next_address + 1
+                        if next_auto > last:
+                            next_auto = -1
+                        db_api.mac_address_range_update(
+                                context, rng, next_auto_assign_mac=next_auto)
 
                 except Exception:
                     LOG.exception("Error in updating mac range")
