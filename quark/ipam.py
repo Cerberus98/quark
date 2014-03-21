@@ -243,7 +243,11 @@ class QuarkIpam(object):
         except Exception:
             # NOTE(mdietz): Our version of sqlalchemy incorrect raises None
             #               here when there's an IP conflict
-            raise exceptions.IpAddressInUse(ip_address=next_ip, net_id=net_id)
+            if ip_address:
+                raise exceptions.IpAddressInUse(ip_address=next_ip,
+                                                net_id=net_id)
+            raise q_exc.IPAddressRetryableFailure(ip_addr=next_ip,
+                                                  net_id=net_id)
 
         return address
 
@@ -353,17 +357,17 @@ class QuarkIpam(object):
 
         for retry in xrange(cfg.CONF.QUARK.ip_address_retry_max):
             if not subnets:
-                subnets = self._choose_available_subnet(
+                subs = self._choose_available_subnet(
                     elevated, net_id, version, segment_id=segment_id,
                     ip_address=ip_address, reallocated_ips=realloc_ips)
             else:
-                subnets = [self.select_subnet(context, net_id, ip_address,
-                                              segment_id, subnet_ids=subnets)]
-            if not subnets:
+                subs = [self.select_subnet(context, net_id, ip_address,
+                                           segment_id, subnet_ids=subnets)]
+            if not subs:
                 raise exceptions.IpAddressGenerationFailure(net_id=net_id)
 
             try:
-                ips = self._allocate_ips_from_subnets(context, net_id, subnets,
+                ips = self._allocate_ips_from_subnets(context, net_id, subs,
                                                       port_id, ip_address,
                                                       **kwargs)
             except q_exc.IPAddressRetryableFailure:
