@@ -70,6 +70,14 @@ class IPAddressRetryableFailure(exceptions.NeutronException):
                 "retrying...")
 
 
+class IPAddressNotInSubnet(exceptions.InvalidInput):
+    message = _("Requested IP %(ip_addr)s not in subnet %(subnet_id)s")
+
+
+class IPAddressProhibitedByPolicy(exceptions.InvalidInput):
+    message = _("IP %(ip_addr)s is prohibited by policies on the subnet")
+
+
 class IPPolicyNotFound(exceptions.NeutronException):
     message = _("IP Policy %(id)s not found.")
 

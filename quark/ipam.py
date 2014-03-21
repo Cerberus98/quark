@@ -228,10 +228,11 @@ class QuarkIpam(object):
             if subnet["ip_version"] == 4:
                 next_ip = next_ip.ipv4()
 
-            if (ip_policy_cidrs is not None and
-                    next_ip in ip_policy_cidrs):
-                raise q_exc.IPAddressRetryableFailure(ip_addr=next_ip,
-                                                      net_id=net_id)
+        if (ip_policy_cidrs is not None and next_ip in ip_policy_cidrs):
+            if ip_address:
+                raise q_exc.IPAddressProhibitedByPolicy(ip_addr=next_ip)
+            raise q_exc.IPAddressRetryableFailure(ip_addr=next_ip,
+                                                  net_id=net_id)
         try:
             with context.session.begin():
                 address = db_api.ip_address_create(
@@ -351,7 +352,6 @@ class QuarkIpam(object):
         new_addresses.extend(realloc_ips)
 
         for retry in xrange(cfg.CONF.QUARK.ip_address_retry_max):
-            subnets = None
             if not subnets:
                 subnets = self._choose_available_subnet(
                     elevated, net_id, version, segment_id=segment_id,
@@ -359,6 +359,8 @@ class QuarkIpam(object):
             else:
                 subnets = [self.select_subnet(context, net_id, ip_address,
                                               segment_id, subnet_ids=subnets)]
+            if not subnets:
+                raise exceptions.IpAddressGenerationFailure(net_id=net_id)
 
             try:
                 ips = self._allocate_ips_from_subnets(context, net_id, subnets,
@@ -424,6 +426,9 @@ class QuarkIpam(object):
             for subnet, ips_in_subnet in subnets:
                 ipnet = netaddr.IPNetwork(subnet["cidr"])
                 if ip_address and ip_address not in ipnet:
+                    if subnet_ids is not None:
+                        raise q_exc.IPAddressNotInSubnet(
+                            ip_addr=ip_address, subnet_id=subnet["id"])
                     continue
 
                 ip_policy_cidrs = None

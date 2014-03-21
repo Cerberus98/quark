@@ -92,7 +92,8 @@ def create_port(context, port):
                     addresses.extend(ipam_driver.allocate_ip_address(
                         context, net["id"], port_id,
                         CONF.QUARK.ipam_reuse_after, segment_id=segment_id,
-                        ip_address=ip_address, mac_address=mac))
+                        ip_address=ip_address, subnets=[subnet_id],
+                        mac_address=mac))
             else:
                 addresses.extend(ipam_driver.allocate_ip_address(
                     context, net["id"], port_id,

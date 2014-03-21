@@ -335,6 +335,8 @@ sa.Index("idx_ports_3", Port.__table__.c.tenant_id)
 
 class MacAddress(BASEV2, models.HasTenant):
     __tablename__ = "quark_mac_addresses"
+    __table_args__ = (sa.UniqueConstraint("mac_address_range_id", "address"),
+                      TABLE_KWARGS)
     address = sa.Column(sa.BigInteger(), primary_key=True)
     mac_address_range_id = sa.Column(
         sa.String(36),
