@@ -28,6 +28,7 @@ from neutron.openstack.common import timeutils
 
 from oslo.config import cfg
 
+from quark import exceptions as q_exc
 from quark.db import api as db_api
 from quark.db import models
 
@@ -218,54 +219,31 @@ class QuarkIpam(object):
     def is_strategy_satisfied(self, ip_addresses):
         return ip_addresses
 
-    def _iterate_until_available_ip(self, context, subnet, network_id,
-                                    ip_policy_cidrs):
-        address = True
-        while address:
-            next_ip_int = int(subnet["next_auto_assign_ip"])
-            next_ip = netaddr.IPAddress(next_ip_int)
-            if subnet["ip_version"] == 4:
-                next_ip = next_ip.ipv4()
-            subnet["next_auto_assign_ip"] = next_ip_int + 1
-
-            #NOTE(mdietz): treating the IPSet as a boolean caused netaddr to
-            #              attempt to enumerate the entire set!
-            if (ip_policy_cidrs is not None and
-                    next_ip in ip_policy_cidrs):
-                continue
-            address = db_api.ip_address_find(
-                context, network_id=network_id, ip_address=next_ip,
-                used_by_tenant_id=context.tenant_id, scope=db_api.ONE)
-
-        ipnet = netaddr.IPNetwork(subnet["cidr"])
-        next_addr = netaddr.IPAddress(
-            subnet["next_auto_assign_ip"])
-        if ipnet.is_ipv4_mapped() or ipnet.version == 4:
-            next_addr = next_addr.ipv4()
-        return next_ip
-
     def _allocate_from_subnet(self, context, net_id, subnet,
                               port_id, ip_address=None, **kwargs):
         ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
-        # Creating this IP for the first time
-        next_ip = None
-        if ip_address:
-            next_ip = ip_address
-            address = db_api.ip_address_find(
-                context, network_id=net_id, ip_address=next_ip,
-                used_by_tenant_id=context.tenant_id, scope=db_api.ONE)
-            if address:
-                raise exceptions.IpAddressGenerationFailure(
-                    net_id=net_id)
-        else:
-            next_ip = self._iterate_until_available_ip(
-                context, subnet, net_id, ip_policy_cidrs)
+        next_ip = ip_address
+        if not next_ip:
+            next_ip = netaddr.IPAddress(subnet["next_auto_assign_ip"] - 1)
+            if subnet["ip_version"] == 4:
+                next_ip = next_ip.ipv4()
 
-        context.session.add(subnet)
-        address = db_api.ip_address_create(
-            context, address=next_ip, subnet_id=subnet["id"],
-            version=subnet["ip_version"], network_id=net_id)
-        address["deallocated"] = 0
+            if (ip_policy_cidrs is not None and
+                    next_ip in ip_policy_cidrs):
+                raise q_exc.IPAddressRetryableFailure(ip_addr=next_ip,
+                                                      net_id=net_id)
+        try:
+            with context.session.begin():
+                address = db_api.ip_address_create(
+                    context, address=next_ip, subnet_id=subnet["id"],
+                    deallocated=0, version=subnet["ip_version"],
+                    network_id=net_id)
+                address["deallocated"] = 0
+        except Exception:
+            # NOTE(mdietz): Our version of sqlalchemy incorrect raises None
+            #               here when there's an IP conflict
+            raise exceptions.IpAddressInUse(ip_address=next_ip, net_id=net_id)
+
         return address
 
     def _allocate_from_v6_subnet(self, context, net_id, subnet,
@@ -302,21 +280,23 @@ class QuarkIpam(object):
                         ip_address in ip_policy_cidrs):
                     continue
 
-                address = db_api.ip_address_find(
-                    context, network_id=net_id, ip_address=ip_address,
-                    used_by_tenant_id=context.tenant_id, scope=db_api.ONE,
-                    lock_mode=True)
+                with context.session.begin():
+                    address = db_api.ip_address_find(
+                        context, network_id=net_id, ip_address=ip_address,
+                        used_by_tenant_id=context.tenant_id, scope=db_api.ONE,
+                        lock_mode=True)
 
-                break
+                    if address:
+                        return db_api.ip_address_update(
+                            context, address, deallocated=False,
+                            deallocated_at=None,
+                            allocated_at=timeutils.utcnow())
 
-            if address:
-                return db_api.ip_address_update(
-                    context, address, deallocated=False, deallocated_at=None,
-                    allocated_at=timeutils.utcnow())
-            else:
-                return db_api.ip_address_create(
-                    context, address=ip_address, subnet_id=subnet["id"],
-                    version=subnet["ip_version"], network_id=net_id)
+                with context.session.begin():
+                    return db_api.ip_address_create(
+                        context, address=ip_address,
+                        subnet_id=subnet["id"],
+                        version=subnet["ip_version"], network_id=net_id)
 
     def _allocate_ips_from_subnets(self, context, net_id, subnets,
                                    port_id, ip_address=None, **kwargs):
@@ -369,17 +349,27 @@ class QuarkIpam(object):
             return realloc_ips
 
         new_addresses.extend(realloc_ips)
-        if not subnets:
-            subnets = self._choose_available_subnet(
-                elevated, net_id, version, segment_id=segment_id,
-                ip_address=ip_address, reallocated_ips=realloc_ips)
-        else:
-            subnets = [self.select_subnet(context, net_id, ip_address,
-                                          segment_id, subnet_ids=subnets)]
 
-        ips = self._allocate_ips_from_subnets(context, net_id, subnets,
-                                              port_id, ip_address, **kwargs)
-        new_addresses.extend(ips)
+        for retry in xrange(cfg.CONF.QUARK.ip_address_retry_max):
+            subnets = None
+            if not subnets:
+                subnets = self._choose_available_subnet(
+                    elevated, net_id, version, segment_id=segment_id,
+                    ip_address=ip_address, reallocated_ips=realloc_ips)
+            else:
+                subnets = [self.select_subnet(context, net_id, ip_address,
+                                              segment_id, subnet_ids=subnets)]
+
+            try:
+                ips = self._allocate_ips_from_subnets(context, net_id, subnets,
+                                                      port_id, ip_address,
+                                                      **kwargs)
+            except q_exc.IPAddressRetryableFailure:
+                LOG.exception("Error in allocating IP")
+                continue
+
+            new_addresses.extend(ips)
+            break
 
         self._notify_new_addresses(context, new_addresses)
         return new_addresses
@@ -426,21 +416,33 @@ class QuarkIpam(object):
 
     def select_subnet(self, context, net_id, ip_address, segment_id,
                       subnet_ids=None, **filters):
-        subnets = db_api.subnet_find_allocation_counts(context, net_id,
-                                                       segment_id=segment_id,
-                                                       scope=db_api.ALL,
-                                                       subnet_id=subnet_ids,
-                                                       **filters)
-        for subnet, ips_in_subnet in subnets:
-            ipnet = netaddr.IPNetwork(subnet["cidr"])
-            if ip_address and ip_address not in ipnet:
-                continue
-            ip_policy_cidrs = None
-            if not ip_address:
-                ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
-            policy_size = ip_policy_cidrs.size if ip_policy_cidrs else 0
-            if ipnet.size > (ips_in_subnet + policy_size):
-                return subnet
+        with context.session.begin():
+            subnets = db_api.subnet_find_allocation_counts(
+                context, net_id, segment_id=segment_id, scope=db_api.ALL,
+                subnet_id=subnet_ids, **filters)
+
+            for subnet, ips_in_subnet in subnets:
+                ipnet = netaddr.IPNetwork(subnet["cidr"])
+                if ip_address and ip_address not in ipnet:
+                    continue
+
+                ip_policy_cidrs = None
+                if not ip_address:
+                    # Policies don't prevent explicit assignment, so we only
+                    # need to check if we're allocating a new IP
+                    ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(
+                        subnet)
+
+                policy_size = ip_policy_cidrs.size if ip_policy_cidrs else 0
+
+                if ipnet.size > (ips_in_subnet + policy_size):
+                    if not ip_address:
+                        next_ip = subnet["next_auto_assign_ip"] + 1
+                        if next_ip > subnet["last_ip"]:
+                            next_ip = -1
+                        db_api.subnet_update(context, subnet,
+                                             next_auto_assign_ip=next_ip)
+                    return subnet
 
 
 class QuarkIpamANY(QuarkIpam):

@@ -118,6 +118,9 @@ class IPAddress(BASEV2, models.HasId):
     Gives us an IP address owner audit log for free, essentially.
     """
     __tablename__ = "quark_ip_addresses"
+    __table_args__ = (sa.UniqueConstraint("subnet_id", "address"),
+                      TABLE_KWARGS)
+
     address_readable = sa.Column(sa.String(128), nullable=False)
     address = sa.Column(custom_types.INET(), nullable=False, index=True)
     subnet_id = sa.Column(sa.String(36),
@@ -239,6 +242,7 @@ class Subnet(BASEV2, models.HasId, IsHazTags):
                              sa.ForeignKey("quark_ip_policy.id"))
     # Legacy data
     do_not_use = sa.Column(sa.Boolean(), default=False)
+
 
 port_ip_association_table = sa.Table(
     "quark_port_ip_address_associations",
