@@ -334,14 +334,12 @@ class QuarkIpam(object):
                                 notifier_api.CONF.default_notification_level,
                                 payload)
 
-    def allocate_ip_address(self, context, net_id, port_id, reuse_after,
-                            segment_id=None, version=None, ip_address=None,
-                            subnets=None, **kwargs):
+    def allocate_ip_address(self, context, new_addresses, net_id, port_id,
+                            reuse_after, segment_id=None, version=None,
+                            ip_address=None, subnets=None, **kwargs):
         elevated = context.elevated()
         if ip_address:
             ip_address = netaddr.IPAddress(ip_address)
-
-        new_addresses = []
 
         realloc_ips = self.attempt_to_reallocate_ip(context, net_id,
                                                     port_id, reuse_after,
@@ -376,9 +374,7 @@ class QuarkIpam(object):
 
             new_addresses.extend(ips)
             break
-
         self._notify_new_addresses(context, new_addresses)
-        return new_addresses
 
     def deallocate_ip_address(self, context, address):
         address["deallocated"] = 1

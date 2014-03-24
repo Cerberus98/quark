@@ -80,7 +80,6 @@ def create_port(context, port):
     with utils.CommandManager().execute() as cmd_mgr:
         @cmd_mgr.do
         def _allocate_ips(fixed_ips, net, port_id, segment_id, mac):
-            addresses = []
             if fixed_ips:
                 for fixed_ip in fixed_ips:
                     subnet_id = fixed_ip.get("subnet_id")
@@ -89,20 +88,19 @@ def create_port(context, port):
                         raise exceptions.BadRequest(
                             resource="fixed_ips",
                             msg="subnet_id and ip_address required")
-                    addresses.extend(ipam_driver.allocate_ip_address(
-                        context, net["id"], port_id,
+                    ipam_driver.allocate_ip_address(
+                        context, addresses, net["id"], port_id,
                         CONF.QUARK.ipam_reuse_after, segment_id=segment_id,
                         ip_address=ip_address, subnets=[subnet_id],
-                        mac_address=mac))
+                        mac_address=mac)
             else:
-                addresses.extend(ipam_driver.allocate_ip_address(
-                    context, net["id"], port_id,
+                ipam_driver.allocate_ip_address(
+                    context, addresses, net["id"], port_id,
                     CONF.QUARK.ipam_reuse_after, segment_id=segment_id,
-                    mac_address=mac))
-            return addresses
+                    mac_address=mac)
 
         @cmd_mgr.undo
-        def _allocate_ips_undo(addresses):
+        def _allocate_ips_undo(addr):
             LOG.info("Rolling back IP addresses...")
             if addresses:
                 for address in addresses:
@@ -183,8 +181,7 @@ def create_port(context, port):
 
         # addresses, mac, backend_port, new_port
         mac = _allocate_mac(net, port_id, mac_address)
-        addresses.extend(_allocate_ips(fixed_ips, net, port_id, segment_id,
-                                       mac))
+        _allocate_ips(fixed_ips, net, port_id, segment_id, mac)
         backend_port = _allocate_backend_port(mac, addresses, net, port_id)
         new_port = _allocate_db_port(port_attrs, backend_port, addresses, mac)
 
