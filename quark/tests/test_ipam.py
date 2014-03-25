@@ -136,6 +136,15 @@ class QuarkNewMacAddressAllocation(QuarkIpamBaseTest):
             with self.assertRaises(exceptions.MacAddressGenerationFailure):
                 self.ipam.allocate_mac_address(self.context, 0, 0, 0)
 
+    def test_allocate_mac_last_mac_in_range_closes_range(self):
+        self.fail()
+
+    def test_allocate_mac_range_unexpectedly_filled_closes(self):
+        self.fail()
+
+    def test_allocate_existing_mac_fails_and_retries(self):
+        self.fail()
+
 
 class QuarkMacAddressDeallocation(QuarkIpamBaseTest):
     @contextlib.contextmanager
@@ -839,6 +848,18 @@ class QuarkNewIPAddressAllocation(QuarkIpamBaseTest):
                 self.ipam.allocate_ip_address(
                     self.context, [], 0, 0, 0, ip_address="0.0.0.240")
 
+    def test_allocate_allocated_ip_fails_and_retries(self):
+        self.fail()
+
+    def test_allocate_explicit_already_allocated_fails_and_retries(self):
+        self.fail()
+
+    def test_allocate_specific_subnet_ip_not_in_subnet_fails(self):
+        self.fail()
+
+    def test_allocate_last_ip_closes_Subnet(self):
+        self.fail()
+
 
 class QuarkIPAddressAllocateDeallocated(QuarkIpamBaseTest):
     @contextlib.contextmanager
@@ -1114,7 +1135,3 @@ class QuarkIpamTestV6IpGeneration(QuarkIpamBaseTest):
         ip = gen.next()
         self.assertEqual(ip,
                          netaddr.IPAddress('fe80::40c9:a95:d83a:2ffa').value)
-
-
-class QuarkIpamTestV6RFCGeneration(QuarkIpamBaseTest):
-    pass

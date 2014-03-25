@@ -240,7 +240,7 @@ class QuarkIpam(object):
                     network_id=net_id)
                 address["deallocated"] = 0
         except Exception:
-            # NOTE(mdietz): Our version of sqlalchemy incorrect raises None
+            # NOTE(mdietz): Our version of sqlalchemy incorrectly raises None
             #               here when there's an IP conflict
             if ip_address:
                 raise exceptions.IpAddressInUse(ip_address=next_ip,
