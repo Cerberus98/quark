@@ -216,7 +216,7 @@ class QuarkIpam(object):
                         context.session.delete(address)
         return []
 
-    def is_strategy_satisfied(self, ip_addresses):
+    def is_strategy_satisfied(self, ip_addresses, allocate_complete=False):
         return ip_addresses
 
     def _allocate_from_subnet(self, context, net_id, subnet,
@@ -224,7 +224,11 @@ class QuarkIpam(object):
         ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
         next_ip = ip_address
         if not next_ip:
-            next_ip = netaddr.IPAddress(subnet["next_auto_assign_ip"] - 1)
+            if subnet["next_auto_assign_ip"] != -1:
+                next_ip = netaddr.IPAddress(subnet["next_auto_assign_ip"] - 1)
+            else:
+                next_ip = netaddr.IPAddress(subnet["last_ip"])
+
             if subnet["ip_version"] == 4:
                 next_ip = next_ip.ipv4()
 
@@ -240,6 +244,7 @@ class QuarkIpam(object):
                     network_id=net_id)
                 address["deallocated"] = 0
         except Exception:
+            LOG.exception('Derp')
             # NOTE(mdietz): Our version of sqlalchemy incorrectly raises None
             #               here when there's an IP conflict
             if ip_address:
@@ -367,7 +372,12 @@ class QuarkIpam(object):
 
             new_addresses.extend(ips)
             break
-        self._notify_new_addresses(context, new_addresses)
+
+        if self.is_strategy_satisfied(new_addresses, allocate_complete=True):
+            self._notify_new_addresses(context, new_addresses)
+            return
+
+        raise exceptions.IpAddressGenerationFailure(net_id=net_id)
 
     def deallocate_ip_address(self, context, address):
         address["deallocated"] = 1
@@ -436,7 +446,7 @@ class QuarkIpam(object):
                 if ipnet.size > (ips_in_subnet + policy_size):
                     if not ip_address:
                         next_ip = subnet["next_auto_assign_ip"] + 1
-                        if next_ip > subnet["last_ip"]:
+                        if next_ip >= subnet["last_ip"]:
                             next_ip = -1
                         db_api.subnet_update(context, subnet,
                                              next_auto_assign_ip=next_ip)
@@ -466,13 +476,17 @@ class QuarkIpamBOTH(QuarkIpam):
     def get_name(self):
         return "BOTH"
 
-    def is_strategy_satisfied(self, reallocated_ips):
+    def is_strategy_satisfied(self, reallocated_ips, allocate_complete=False):
         req = [4, 6]
         for ip in reallocated_ips:
             if ip is not None:
                 req.remove(ip["version"])
-        if len(req) == 0:
+        ips_allocated = len(req)
+        if ips_allocated == 0:
             return True
+        elif ips_allocated == 1 and allocate_complete:
+            return True
+
         return False
 
     def attempt_to_reallocate_ip(self, context, net_id, port_id,
@@ -513,6 +527,17 @@ class QuarkIpamBOTHREQ(QuarkIpamBOTH):
     @classmethod
     def get_name(self):
         return "BOTH_REQUIRED"
+
+    def is_strategy_satisfied(self, reallocated_ips, allocate_complete=False):
+        req = [4, 6]
+        for ip in reallocated_ips:
+            if ip is not None:
+                req.remove(ip["version"])
+        ips_allocated = len(req)
+        if ips_allocated == 0:
+            return True
+
+        return False
 
     def _choose_available_subnet(self, context, net_id, version=None,
                                  segment_id=None, ip_address=None,

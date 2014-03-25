@@ -23,6 +23,7 @@ from neutron.openstack.common.notifier import api as notifier_api
 from oslo.config import cfg
 
 from quark.db import models
+from quark import exceptions as q_exc
 import quark.ipam
 from quark.tests import test_base
 
@@ -848,17 +849,75 @@ class QuarkNewIPAddressAllocation(QuarkIpamBaseTest):
                 self.ipam.allocate_ip_address(
                     self.context, [], 0, 0, 0, ip_address="0.0.0.240")
 
+
+class QuarkIPAddressAllocationTestRetries(QuarkIpamBaseTest):
+    @contextlib.contextmanager
+    def _stubs(self, address=None, subnets=None):
+        db_mod = "quark.db.api"
+        self.context.session.add = mock.Mock()
+        with contextlib.nested(
+            mock.patch("%s.ip_address_find" % db_mod),
+            mock.patch("%s.ip_address_create" % db_mod),
+            mock.patch("quark.ipam.QuarkIpam._notify_new_addresses"),
+            mock.patch("%s.subnet_find_allocation_counts" % db_mod)
+        ) as (addr_find, addr_create, notify, subnet_find):
+            addr_find.side_effect = [None, None]
+            addr_create.side_effect = address
+            subnet_find.return_value = subnets
+            yield
+
     def test_allocate_allocated_ip_fails_and_retries(self):
-        self.fail()
+        subnet1 = dict(id=1, first_ip=0, last_ip=255, next_auto_assign_ip=1,
+                       cidr="0.0.0.0/24", ip_version=4,
+                       network=dict(ip_policy=None), ip_policy=None)
+        subnets = [(subnet1, 1)]
+        addr_found = dict(id=1, address=2)
+        with self._stubs(subnets=subnets,
+                         address=[q_exc.IPAddressRetryableFailure,
+                                  addr_found]):
+            addr = []
+            self.ipam.allocate_ip_address(self.context, addr, 0, 0, 0)
+            self.assertEqual(subnet1["next_auto_assign_ip"], 3)
+            self.assertEqual(addr[0]["address"], 2)
 
     def test_allocate_explicit_already_allocated_fails_and_retries(self):
-        self.fail()
+        subnet1 = dict(id=1, first_ip=0, last_ip=255, next_auto_assign_ip=1,
+                       cidr="0.0.0.0/24", ip_version=4,
+                       network=dict(ip_policy=None), ip_policy=None)
+        subnets = [(subnet1, 1), (subnet1, 1)]
+        addr_found = dict(id=1, address=1)
+        with self._stubs(subnets=subnets,
+                         address=[q_exc.IPAddressRetryableFailure,
+                                  addr_found]):
+            with self.assertRaises(exceptions.IpAddressInUse):
+                self.ipam.allocate_ip_address(
+                    self.context, [], 0, 0, 0, ip_address="0.0.0.1")
 
     def test_allocate_specific_subnet_ip_not_in_subnet_fails(self):
-        self.fail()
+        subnet1 = dict(id=1, first_ip=0, last_ip=255, next_auto_assign_ip=1,
+                       cidr="0.0.0.0/24", ip_version=4,
+                       network=dict(ip_policy=None), ip_policy=None)
+        subnets = [(subnet1, 1), (subnet1, 1)]
+        addr_found = dict(id=1, address=256)
+        with self._stubs(subnets=subnets,
+                         address=[q_exc.IPAddressRetryableFailure,
+                                  addr_found]):
+            with self.assertRaises(q_exc.IPAddressNotInSubnet):
+                self.ipam.allocate_ip_address(
+                    self.context, [], 0, 0, 0, ip_address="0.0.1.0",
+                    subnets=subnet1)
 
-    def test_allocate_last_ip_closes_Subnet(self):
-        self.fail()
+    def test_allocate_last_ip_closes_subnet(self):
+        subnet1 = dict(id=1, first_ip=0, last_ip=1, next_auto_assign_ip=1,
+                       cidr="0.0.0.0/24", ip_version=4,
+                       network=dict(ip_policy=None), ip_policy=None)
+        subnets = [(subnet1, 1)]
+        addr_found = dict(id=1, address=1)
+        with self._stubs(subnets=subnets, address=[addr_found]):
+            addr = []
+            self.ipam.allocate_ip_address(self.context, addr, 0, 0, 0)
+            self.assertEqual(subnet1["next_auto_assign_ip"], -1)
+            self.assertEqual(addr[0]["address"], 1)
 
 
 class QuarkIPAddressAllocateDeallocated(QuarkIpamBaseTest):
@@ -896,19 +955,20 @@ class QuarkIPAddressAllocateDeallocated(QuarkIpamBaseTest):
             self.assertFalse(choose_subnet.called)
 
     def test_allocate_finds_deallocated_ip_out_of_range_deletes(self):
-        subnet = dict(id=1, ip_version=4, next_auto_assign_ip=1,
-                      cidr="0.0.0.0/29", ip_policy=dict(exclude=[
-                          models.IPPolicyCIDR(cidr="0.0.0.0/31")]))
+        subnet = dict(id=1, ip_version=4, next_auto_assign_ip=2,
+                      cidr="0.0.0.0/29", ip_policy=None,
+                      network=dict(ip_policy=None))
         address = dict(id=1, address=254)
+        address2 = dict(id=1, address=1)
         address["subnet"] = subnet
-        addresses_found = [address, None]
+        addresses_found = [address, address2]
         self.context.session.delete = mock.Mock()
         with self._stubs(False, subnet, address, addresses_found,
                          sub_found=True):
             addr = []
             self.ipam.allocate_ip_address(self.context, addr, 0, 0, 0)
             self.assertTrue(self.context.session.delete.called)
-            self.assertEqual(len(addr), 0)
+            self.assertEqual(len(addr), 1)
         self.context.session.delete = mock.Mock()
 
     def test_allocate_finds_no_deallocated_creates_new_ip(self):
