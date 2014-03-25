@@ -28,9 +28,9 @@ from neutron.openstack.common import timeutils
 
 from oslo.config import cfg
 
-from quark import exceptions as q_exc
 from quark.db import api as db_api
 from quark.db import models
+from quark import exceptions as q_exc
 
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
@@ -135,7 +135,7 @@ class QuarkIpam(object):
                         if next_auto > last:
                             next_auto = -1
                         db_api.mac_address_range_update(
-                                context, rng, next_auto_assign_mac=next_auto)
+                            context, rng, next_auto_assign_mac=next_auto)
 
                 except Exception:
                     LOG.exception("Error in updating mac range")
@@ -229,10 +229,9 @@ class QuarkIpam(object):
                 next_ip = next_ip.ipv4()
 
         if (ip_policy_cidrs is not None and next_ip in ip_policy_cidrs):
-            if ip_address:
-                raise q_exc.IPAddressProhibitedByPolicy(ip_addr=next_ip)
-            raise q_exc.IPAddressRetryableFailure(ip_addr=next_ip,
-                                                  net_id=net_id)
+            if not ip_address:
+                raise q_exc.IPAddressRetryableFailure(ip_addr=next_ip,
+                                                      net_id=net_id)
         try:
             with context.session.begin():
                 address = db_api.ip_address_create(
@@ -306,6 +305,7 @@ class QuarkIpam(object):
     def _allocate_ips_from_subnets(self, context, net_id, subnets,
                                    port_id, ip_address=None, **kwargs):
         new_addresses = []
+        subnets = subnets or []
         for subnet in subnets:
             address = None
             if int(subnet["ip_version"]) == 4:
@@ -341,29 +341,22 @@ class QuarkIpam(object):
         if ip_address:
             ip_address = netaddr.IPAddress(ip_address)
 
-        realloc_ips = self.attempt_to_reallocate_ip(context, net_id,
-                                                    port_id, reuse_after,
-                                                    version=None,
-                                                    ip_address=ip_address,
-                                                    segment_id=segment_id,
-                                                    subnets=subnets,
-                                                    **kwargs)
-        if self.is_strategy_satisfied(realloc_ips):
-            return realloc_ips
+        new_addresses.extend(self.attempt_to_reallocate_ip(
+            context, net_id, port_id, reuse_after, version=None,
+            ip_address=ip_address, segment_id=segment_id, subnets=subnets,
+            **kwargs))
 
-        new_addresses.extend(realloc_ips)
+        if self.is_strategy_satisfied(new_addresses):
+            return
 
         for retry in xrange(cfg.CONF.QUARK.ip_address_retry_max):
             if not subnets:
                 subs = self._choose_available_subnet(
                     elevated, net_id, version, segment_id=segment_id,
-                    ip_address=ip_address, reallocated_ips=realloc_ips)
+                    ip_address=ip_address, reallocated_ips=new_addresses)
             else:
                 subs = [self.select_subnet(context, net_id, ip_address,
                                            segment_id, subnet_ids=subnets)]
-            if not subs:
-                raise exceptions.IpAddressGenerationFailure(net_id=net_id)
-
             try:
                 ips = self._allocate_ips_from_subnets(context, net_id, subs,
                                                       port_id, ip_address,
