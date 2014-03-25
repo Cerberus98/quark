@@ -151,7 +151,7 @@ class QuarkIpam(object):
                         mac_address_range_id=rng["id"])
                     return address
             except Exception:
-                LOG.exception("Error in creating mac. MAC likely duplicate")
+                LOG.exception("Error in creating mac. MAC possibly duplicate")
                 continue
 
         raise exceptions.MacAddressGenerationFailure(net_id=net_id)
@@ -244,7 +244,6 @@ class QuarkIpam(object):
                     network_id=net_id)
                 address["deallocated"] = 0
         except Exception:
-            LOG.exception('Derp')
             # NOTE(mdietz): Our version of sqlalchemy incorrectly raises None
             #               here when there's an IP conflict
             if ip_address:
@@ -307,9 +306,9 @@ class QuarkIpam(object):
                         subnet_id=subnet["id"],
                         version=subnet["ip_version"], network_id=net_id)
 
-    def _allocate_ips_from_subnets(self, context, net_id, subnets,
-                                   port_id, ip_address=None, **kwargs):
-        new_addresses = []
+    def _allocate_ips_from_subnets(self, context, new_addresses, net_id,
+                                   subnets, port_id, ip_address=None,
+                                   **kwargs):
         subnets = subnets or []
         for subnet in subnets:
             address = None
@@ -362,15 +361,15 @@ class QuarkIpam(object):
             else:
                 subs = [self.select_subnet(context, net_id, ip_address,
                                            segment_id, subnet_ids=subnets)]
+
             try:
-                ips = self._allocate_ips_from_subnets(context, net_id, subs,
-                                                      port_id, ip_address,
-                                                      **kwargs)
+                self._allocate_ips_from_subnets(context, new_addresses, net_id,
+                                                subs, port_id,
+                                                ip_address, **kwargs)
             except q_exc.IPAddressRetryableFailure:
                 LOG.exception("Error in allocating IP")
                 continue
 
-            new_addresses.extend(ips)
             break
 
         if self.is_strategy_satisfied(new_addresses, allocate_complete=True):

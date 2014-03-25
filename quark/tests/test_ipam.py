@@ -138,13 +138,46 @@ class QuarkNewMacAddressAllocation(QuarkIpamBaseTest):
                 self.ipam.allocate_mac_address(self.context, 0, 0, 0)
 
     def test_allocate_mac_last_mac_in_range_closes_range(self):
-        self.fail()
+        mar = dict(id=1, first_address=0, last_address=1,
+                   next_auto_assign_mac=1)
+        with self._stubs(ranges=(mar, 0), addresses=[None, None]):
+            address = self.ipam.allocate_mac_address(self.context, 0, 0, 0)
+            self.assertEqual(address["address"], 1)
+            self.assertEqual(mar["next_auto_assign_mac"], -1)
 
     def test_allocate_mac_range_unexpectedly_filled_closes(self):
-        self.fail()
+        mar = dict(id=1, first_address=0, last_address=1,
+                   next_auto_assign_mac=1)
+        with self._stubs(ranges=(mar, 4), addresses=[None, None]):
+            with self.assertRaises(exceptions.MacAddressGenerationFailure):
+                self.ipam.allocate_mac_address(self.context, 0, 0, 0)
+            self.assertEqual(mar["next_auto_assign_mac"], -1)
+
+
+class QuarkNewMacAddressAllocationCreateConflict(QuarkIpamBaseTest):
+    @contextlib.contextmanager
+    def _stubs(self, addresses=None, ranges=None):
+        if not addresses:
+            addresses = [None]
+        db_mod = "quark.db.api"
+        with contextlib.nested(
+            mock.patch("%s.mac_address_find" % db_mod),
+            mock.patch("%s.mac_address_create" % db_mod),
+            mock.patch("%s.mac_address_range_find_allocation_counts" % db_mod),
+        ) as (mac_find, mac_create, mac_range_count):
+            mac_find.side_effect = [None, None]
+            mac_create.side_effect = addresses
+            mac_range_count.return_value = ranges
+            yield
 
     def test_allocate_existing_mac_fails_and_retries(self):
-        self.fail()
+        mar = dict(id=1, first_address=0, last_address=255,
+                   next_auto_assign_mac=0)
+        mac = dict(id=1, address=254)
+        with self._stubs(ranges=(mar, 0), addresses=[Exception, mac]):
+            address = self.ipam.allocate_mac_address(self.context, 0, 0, 0,
+                                                     mac_address=254)
+            self.assertEqual(address["address"], 254)
 
 
 class QuarkMacAddressDeallocation(QuarkIpamBaseTest):
@@ -640,6 +673,28 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
             self.assertEqual(address[0]["version"], 4)
             self.assertEqual(address[1]["address"], 42)
             self.assertEqual(address[1]["version"], 6)
+
+    def test_allocate_allocate_ip_unsatisfied_strategy_fails(self):
+        old_override = cfg.CONF.QUARK.v6_allocation_attempts
+        cfg.CONF.set_override('ip_address_retry_max', 1, 'QUARK')
+
+        subnet4 = dict(id=1, first_ip=0, last_ip=255,
+                       cidr="0.0.0.0/24", ip_version=4,
+                       next_auto_assign_ip=1, network=dict(ip_policy=None),
+                       ip_policy=None)
+        subnet6 = dict(id=1, first_ip=self.v6_fip, last_ip=self.v6_lip,
+                       cidr="feed::/104", ip_version=6,
+                       next_auto_assign_ip=-2, network=dict(ip_policy=None),
+                       ip_policy=None)
+
+        with self._stubs(subnets=[[(subnet4, 0)], [(subnet6, 0)]],
+                         addresses=[None, None, None, None]):
+            address = []
+            with self.assertRaises(exceptions.IpAddressGenerationFailure):
+                self.ipam.allocate_ip_address(self.context, address, 0, 0, 0)
+            self.assertEqual(address[0]["address"], 1)
+
+        cfg.CONF.set_override('ip_address_retry_max', old_override, 'QUARK')
 
 
 class QuarkIpamBoth(QuarkIpamBaseTest):
