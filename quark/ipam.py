@@ -92,13 +92,20 @@ class QuarkIpam(object):
             mac_address = netaddr.EUI(mac_address).value
 
         with context.session.begin():
-            deallocated_mac = db_api.mac_address_find(
-                context, lock_mode=True, reuse_after=reuse_after,
-                scope=db_api.ONE, address=mac_address)
-            if deallocated_mac:
-                return db_api.mac_address_update(
-                    context, deallocated_mac, deallocated=False,
-                    deallocated_at=None)
+            for retry in xrange(cfg.CONF.QUARK.mac_address_retry_max):
+                try:
+                    deallocated_mac = db_api.mac_address_find(
+                        context, lock_mode=True, reuse_after=reuse_after,
+                        deallocated=True, scope=db_api.ONE,
+                        address=mac_address, order_by="address ASC")
+                    if deallocated_mac:
+                        return db_api.mac_address_update(
+                            context, deallocated_mac, deallocated=False,
+                            deallocated_at=None)
+                    break
+                except Exception:
+                    LOG.exception("Error in mac reallocate...")
+                    continue
 
         # This could fail if a large chunk of MACs were chosen explicitly,
         # but under concurrent load enough MAC creates should iterate without
