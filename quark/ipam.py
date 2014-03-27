@@ -222,6 +222,8 @@ class QuarkIpam(object):
                             else:
                                 # Make sure we never find it again
                                 context.session.delete(address)
+                    else:
+                        break
             except Exception:
                 LOG.exception("Error in reallocate ip...")
         return []

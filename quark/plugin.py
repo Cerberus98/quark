@@ -35,6 +35,8 @@ from quark.plugin_modules import routes
 from quark.plugin_modules import security_groups
 from quark.plugin_modules import subnets
 
+from quark import utils
+
 LOG = logging.getLogger(__name__)
 
 CONF = cfg.CONF
@@ -222,6 +224,7 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
     def update_ip_address(self, context, id, ip_address):
         return ip_addresses.update_ip_address(context, id, ip_address)
 
+    @utils.profile("create_port.txt")
     @sessioned
     def create_port(self, context, port):
         self._fix_missing_tenant_id(context, port["port"])
