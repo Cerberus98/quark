@@ -111,16 +111,15 @@ class QuarkIpam(object):
         # but under concurrent load enough MAC creates should iterate without
         # any given thread exhausting its retry count.
         for retry in xrange(cfg.CONF.QUARK.mac_address_retry_max):
-
             next_address = None
             with context.session.begin():
-                mac_range = db_api.mac_address_range_find_allocation_counts(
-                    context, address=mac_address)
-
-                if not mac_range:
-                    break
-
                 try:
+                    fn = db_api.mac_address_range_find_allocation_counts
+                    mac_range = fn(context, address=mac_address)
+
+                    if not mac_range:
+                        break
+
                     rng, addr_count = mac_range
 
                     last = rng["last_address"]
