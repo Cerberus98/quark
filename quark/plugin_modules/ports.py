@@ -271,17 +271,18 @@ def update_port(context, id, port):
                               address.get('address_readable', '')}
                              for address in addresses]
 
-        group_ids, security_groups = v.make_security_group_list(
-            context, port["port"].pop("security_groups", None))
-        net_driver = registry.DRIVER_REGISTRY.get_driver(
-            port_db.network["network_plugin"])
-        net_driver.update_port(context, port_id=port_db.backend_key,
-                               security_groups=group_ids,
-                               allowed_pairs=address_pairs)
+    group_ids, security_groups = v.make_security_group_list(
+        context, port["port"].pop("security_groups", None))
+    net_driver = registry.DRIVER_REGISTRY.get_driver(
+        port_db.network["network_plugin"])
+    net_driver.update_port(context, port_id=port_db.backend_key,
+                           security_groups=group_ids,
+                           allowed_pairs=address_pairs)
 
-        port["port"]["security_groups"] = security_groups
-        with context.session.begin():
-            port = db_api.port_update(context, port_db, **port["port"])
+    port["port"]["security_groups"] = security_groups
+
+    with context.session.begin():
+        port = db_api.port_update(context, port_db, **port["port"])
 
     return v._make_port_dict(port)
 
