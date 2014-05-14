@@ -162,7 +162,7 @@ def scoped(f):
 
 
 @scoped
-def port_find(context, **filters):
+def port_find(context, fields=None, **filters):
     query = context.session.query(models.Port).\
         options(orm.joinedload(models.Port.ip_addresses))
     model_filters = _model_query(context, models.Port, filters)
@@ -175,6 +175,12 @@ def port_find(context, **filters):
 
     if "join_security_groups" in filters:
         query = query.options(orm.joinedload(models.Port.security_groups))
+
+    if fields and "port_subnets" in fields:
+        #query = query.options(orm.subqueryload_all(models.IPAddress.subnet))
+        query = query.options(orm.subqueryload_all(models.Subnet.routes))
+        query = query.options(
+            orm.subqueryload_all(models.Subnet.dns_nameservers))
 
     return query.filter(*model_filters).order_by(asc(models.Port.created_at))
 
