@@ -177,10 +177,9 @@ def port_find(context, fields=None, **filters):
         query = query.options(orm.joinedload(models.Port.security_groups))
 
     if fields and "port_subnets" in fields:
-        #query = query.options(orm.subqueryload_all(models.IPAddress.subnet))
-        query = query.options(orm.subqueryload_all(models.Subnet.routes))
+        query = query.options(orm.joinedload("ip_addresses.subnet"))
         query = query.options(
-            orm.subqueryload_all(models.Subnet.dns_nameservers))
+            orm.joinedload("ip_addresses.subnet.dns_nameservers"))
 
     return query.filter(*model_filters).order_by(asc(models.Port.created_at))
 
