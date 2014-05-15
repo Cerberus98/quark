@@ -89,7 +89,7 @@ class Plugin(neutron_plugin_base_v2.NeutronPluginBaseV2,
                                    "security-group", "diagnostics",
                                    "subnets_quark", "provider",
                                    "ip_policies", "quotas",
-                                   "networks_quark", "router"]
+                                   "networks_quark", "router", "config"]
 
     def __init__(self):
         LOG.info("Starting quark plugin")
