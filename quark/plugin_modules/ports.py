@@ -208,13 +208,11 @@ def update_port(context, id, port):
 
     admin_only = ["mac_address", "device_owner", "bridge", "admin_state_up",
                   "device_id"]
-    utils.filter_body(context, port_dict, admin_only=admin_only)
+    always_filter = ["network_id", "backend_key"]
+    utils.filter_body(context, port_dict, admin_only=admin_only,
+                      always_filter=always_filter)
 
-    # Always pop these attributes, they shouldn't be updatable
-    utils.pop_param(port_dict, "network_id")
-    utils.pop_param(port_dict, "backend_key")
     if fixed_ips is not None:
-
         # NOTE(mdietz): we want full control over IPAM since
         #              we're allocating by subnet instead of
         #              network.
