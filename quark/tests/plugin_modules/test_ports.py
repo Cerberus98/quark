@@ -1076,22 +1076,44 @@ class TestQuarkPortUpdateFiltering(test_quark_plugin.TestQuarkPlugin):
         ) as (port_find, port_update):
             port_find.return_value = port_model
             port_update.return_value = port_model
-            yield port_update
+            yield port_find, port_update
 
     def test_update_port_attribute_filtering(self):
         new_port = {}
         new_port["port"] = {
             "mac_address": "DD:EE:FF:00:00:00", "device_owner": "new_owner",
             "bridge": "new_bridge", "admin_state_up": False, "device_id": 3,
-            "network_id": 10, "backend_key": 1234}
+            "network_id": 10, "backend_key": 1234, "name": "new_name"}
 
         with self._stubs(
             port=dict(id=1, name="myport")
-        ) as (port_find, port_update, alloc_ip, dealloc_ip):
+        ) as (port_find, port_update):
             self.plugin.update_port(self.context, 1, new_port)
-            self.assertEqual(port_find.call_count, 2)
             port_update.assert_called_once_with(
                 self.context,
                 port_find(),
-                name="ourport",
+                name="new_name",
+                security_groups=[])
+
+    def test_update_port_attribute_filtering_admin(self):
+        new_port = {}
+        new_port["port"] = {
+            "mac_address": "DD:EE:FF:00:00:00", "device_owner": "new_owner",
+            "bridge": "new_bridge", "admin_state_up": False, "device_id": 3,
+            "network_id": 10, "backend_key": 1234, "name": "new_name"}
+
+        admin_ctx = self.context.elevated()
+        with self._stubs(
+            port=dict(id=1, name="myport")
+        ) as (port_find, port_update):
+            self.plugin.update_port(admin_ctx, 1, new_port)
+            port_update.assert_called_once_with(
+                admin_ctx,
+                port_find(),
+                name="new_name",
+                bridge=new_port["port"]["bridge"],
+                admin_state_up=new_port["port"]["admin_state_up"],
+                device_owner=new_port["port"]["device_owner"],
+                mac_address=new_port["port"]["mac_address"],
+                device_id=new_port["port"]["device_id"],
                 security_groups=[])
