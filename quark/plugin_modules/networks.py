@@ -77,7 +77,7 @@ def create_network(context, network):
         pnet_type, phys_net, seg_id = _adapt_provider_nets(context, network)
 
         ipam_strategy = utils.pop_param(net_attrs, "ipam_strategy", None)
-        if not context.is_admin or not ipam_strategy:
+        if ipam_strategy and not context.is_admin:
             ipam_strategy = CONF.QUARK.default_ipam_strategy
 
         if not ipam.IPAM_REGISTRY.is_valid_strategy(ipam_strategy):

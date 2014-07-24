@@ -20,6 +20,7 @@ import mock
 from neutron.api.v2 import attributes as neutron_attrs
 from neutron.common import exceptions
 from neutron.extensions import securitygroup as sg_ext
+from oslo.config import cfg
 
 from quark.db import api as quark_db_api
 from quark.db import models
@@ -963,3 +964,133 @@ class TestPortBadNetworkPlugin(test_quark_plugin.TestQuarkPlugin):
 
             with self.assertRaises(Exception):  # noqa
                 self.plugin.create_port(self.context, port)
+
+
+class TestQuarkPortCreateFiltering(test_quark_plugin.TestQuarkPlugin):
+    @contextlib.contextmanager
+    def _stubs(self, port=None, network=None, addr=None, mac=None):
+        if network:
+            network["network_plugin"] = "BASE"
+            network["ipam_strategy"] = "ANY"
+        port_model = models.Port()
+        port_model.update(port)
+        port_models = port_model
+
+        db_mod = "quark.db.api"
+        ipam = "quark.ipam.QuarkIpam"
+
+        with contextlib.nested(
+            mock.patch("%s.port_create" % db_mod),
+            mock.patch("%s.network_find" % db_mod),
+            mock.patch("%s.allocate_ip_address" % ipam),
+            mock.patch("%s.allocate_mac_address" % ipam),
+            mock.patch("neutron.openstack.common.uuidutils.generate_uuid"),
+        ) as (port_create, net_find, alloc_ip, alloc_mac, gen_uuid):
+            port_create.return_value = port_models
+            net_find.return_value = network
+            alloc_ip.return_value = addr
+            alloc_mac.return_value = mac
+            gen_uuid.return_value = 1
+            yield port_create, alloc_mac
+
+    def test_create_port_attribute_filtering(self):
+        network = dict(id=1)
+        mac = dict(address="AA:BB:CC:DD:EE:FF")
+        port_name = "foobar"
+        ip = dict()
+        port = dict(port=dict(mac_address=mac["address"], network_id=1,
+                              tenant_id=self.context.tenant_id, device_id=2,
+                              name=port_name, device_owner="quark_tests",
+                              bridge="quark_bridge", admin_state_up=False))
+
+        expected_mac = port["port"]["mac_address"]
+        port_create_dict = {}
+        port_create_dict["port"] = port["port"].copy()
+        port_create_dict["port"]["mac_address"] = "DE:AD:BE:EF:00:00"
+        port_create_dict["port"]["device_owner"] = "ignored"
+        port_create_dict["port"]["bridge"] = "ignored"
+        port_create_dict["port"]["admin_state_up"] = "ignored"
+
+        with self._stubs(port=port["port"], network=network, addr=ip,
+                         mac=mac) as (port_create, alloc_mac):
+            self.plugin.create_port(self.context, port_create_dict)
+            port_create.assert_called_once_with(
+                self.context, addresses=[], network_id=1,
+                tenant_id="fake", uuid=1, name="foobar",
+                mac_address=expected_mac, backend_key=1, id=1,
+                security_groups=[], device_id=2)
+
+    def test_create_port_attribute_filtering_admin(self):
+        network = dict(id=1)
+        mac = dict(address="AA:BB:CC:DD:EE:FF")
+        port_name = "foobar"
+        ip = dict()
+
+        port = dict(port=dict(mac_address=mac["address"], network_id=1,
+                              tenant_id=self.context.tenant_id, device_id=2,
+                              name=port_name, device_owner="quark_tests",
+                              bridge="quark_bridge", admin_state_up=False))
+
+        expected_mac = "DE:AD:BE:EF:00:00"
+        expected_bridge = "new_bridge"
+        expected_device_owner = "new_device_owner"
+        expected_admin_state = "new_state"
+
+        port_create_dict = {}
+        port_create_dict["port"] = port["port"].copy()
+        port_create_dict["port"]["mac_address"] = expected_mac
+        port_create_dict["port"]["device_owner"] = expected_device_owner
+        port_create_dict["port"]["bridge"] = expected_bridge
+        port_create_dict["port"]["admin_state_up"] = expected_admin_state
+
+        admin_ctx = self.context.elevated()
+        with self._stubs(port=port["port"], network=network, addr=ip,
+                         mac=mac) as (port_create, alloc_mac):
+            self.plugin.create_port(admin_ctx, port_create_dict)
+
+            alloc_mac.assert_called_once_with(
+                admin_ctx, network["id"], 1,
+                cfg.CONF.QUARK.ipam_reuse_after,
+                mac_address=expected_mac)
+            port_create.assert_called_once_with(
+                admin_ctx, bridge=expected_bridge, uuid=1, name="foobar",
+                admin_state_up=expected_admin_state, network_id=1,
+                tenant_id="fake", id=1, device_owner=expected_device_owner,
+                mac_address=mac["address"], device_id=2, backend_key=1,
+                security_groups=[], addresses=[])
+
+
+class TestQuarkPortUpdateFiltering(test_quark_plugin.TestQuarkPlugin):
+    @contextlib.contextmanager
+    def _stubs(self, port, new_ips=None):
+        port_model = None
+        if port:
+            net_model = models.Network()
+            net_model["network_plugin"] = "BASE"
+            port_model = models.Port()
+            port_model.network = net_model
+            port_model.update(port)
+        with contextlib.nested(
+            mock.patch("quark.db.api.port_find"),
+            mock.patch("quark.db.api.port_update"),
+            mock.patch("quark.ipam.QuarkIpam.allocate_ip_address"),
+            mock.patch("quark.ipam.QuarkIpam.deallocate_ips_by_port")
+        ) as (port_find, port_update, alloc_ip, dealloc_ip):
+            port_find.return_value = port_model
+            port_update.return_value = port_model
+            if new_ips:
+                alloc_ip.return_value = new_ips
+            yield port_find, port_update, alloc_ip, dealloc_ip
+
+    def test_update_port_attribute_filtering(self):
+        with self._stubs(
+            port=dict(id=1, name="myport")
+        ) as (port_find, port_update, alloc_ip, dealloc_ip):
+            new_port = dict(port=dict(name="ourport"))
+            self.plugin.update_port(self.context, 1, new_port)
+            self.assertEqual(port_find.call_count, 2)
+            port_update.assert_called_once_with(
+                self.context,
+                port_find(),
+                name="ourport",
+                security_groups=[])
