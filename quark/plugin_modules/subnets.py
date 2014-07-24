@@ -201,10 +201,10 @@ def update_subnet(context, id, subnet):
             raise exceptions.SubnetNotFound(id=id)
 
         s = subnet["subnet"]
-        always_pop = ["_cidr"]
-        admin_only = ["segment_id", "do_not_use", "created_at",
-                      "next_auto_assign_ip", "enable_dhcp", "ip_version",
-                      "first_ip", "last_ip"]
+        always_pop = ["_cidr", "cidr", "first_ip", "last_ip", "ip_version",
+                      "segment_id", "network_id"]
+        admin_only = ["do_not_use", "created_at", "tenant_id",
+                      "next_auto_assign_ip", "enable_dhcp"]
         utils.filter_body(context, s, admin_only, always_pop)
 
         dns_ips = utils.pop_param(s, "dns_nameservers", [])
