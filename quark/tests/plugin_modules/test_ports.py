@@ -1073,20 +1073,21 @@ class TestQuarkPortUpdateFiltering(test_quark_plugin.TestQuarkPlugin):
         with contextlib.nested(
             mock.patch("quark.db.api.port_find"),
             mock.patch("quark.db.api.port_update"),
-            mock.patch("quark.ipam.QuarkIpam.allocate_ip_address"),
-            mock.patch("quark.ipam.QuarkIpam.deallocate_ips_by_port")
-        ) as (port_find, port_update, alloc_ip, dealloc_ip):
+        ) as (port_find, port_update):
             port_find.return_value = port_model
             port_update.return_value = port_model
-            if new_ips:
-                alloc_ip.return_value = new_ips
-            yield port_find, port_update, alloc_ip, dealloc_ip
+            yield port_update
 
     def test_update_port_attribute_filtering(self):
+        new_port = {}
+        new_port["port"] = {
+            "mac_address": "DD:EE:FF:00:00:00", "device_owner": "new_owner",
+            "bridge": "new_bridge", "admin_state_up": False, "device_id": 3,
+            "network_id": 10, "backend_key": 1234}
+
         with self._stubs(
             port=dict(id=1, name="myport")
         ) as (port_find, port_update, alloc_ip, dealloc_ip):
-            new_port = dict(port=dict(name="ourport"))
             self.plugin.update_port(self.context, 1, new_port)
             self.assertEqual(port_find.call_count, 2)
             port_update.assert_called_once_with(
