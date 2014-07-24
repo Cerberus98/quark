@@ -933,9 +933,10 @@ class TestSubnetsNotification(test_quark_plugin.TestQuarkPlugin):
         s = dict(network_id=1, cidr="192.168.10.0/24",
                  tenant_id=1, id=1, created_at="123")
         with self._stubs(s) as notify:
-            self.plugin.create_subnet(self.context, dict(subnet=s))
+            admin_context = self.context.elevated()
+            self.plugin.create_subnet(admin_context, dict(subnet=s))
             notify.assert_called_once_with(
-                self.context,
+                admin_context,
                 notifier_api.publisher_id("network"),
                 "ip_block.create",
                 notifier_api.CONF.default_notification_level,

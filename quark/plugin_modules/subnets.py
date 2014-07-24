@@ -91,6 +91,17 @@ def create_subnet(context, subnet):
 
         sub_attrs = subnet["subnet"]
 
+        always_pop = ["enable_dhcp", "ip_version", "first_ip", "last_ip",
+                      "_cidr"]
+        admin_only = ["segment_id", "do_not_use", "created_at",
+                      "next_auto_assign_ip"]
+        for attr in always_pop:
+            if attr in sub_attrs:
+                sub_attrs.pop(attr)
+        if not context.is_admin:
+            for attr in admin_only:
+                if attr in sub_attrs:
+                    sub_attrs.pop(attr)
         _validate_subnet_cidr(context, net_id, sub_attrs["cidr"])
 
         cidr = netaddr.IPNetwork(sub_attrs["cidr"])
@@ -113,9 +124,6 @@ def create_subnet(context, subnet):
         dns_ips = utils.pop_param(sub_attrs, "dns_nameservers", [])
         host_routes = utils.pop_param(sub_attrs, "host_routes", [])
         allocation_pools = utils.pop_param(sub_attrs, "allocation_pools", None)
-
-        if not context.is_admin and "segment_id" in sub_attrs:
-            sub_attrs.pop("segment_id")
 
         sub_attrs["network"] = net
 
@@ -193,10 +201,15 @@ def update_subnet(context, id, subnet):
             raise exceptions.SubnetNotFound(id=id)
 
         s = subnet["subnet"]
+        always_pop = ["_cidr"]
+        admin_only = ["segment_id", "do_not_use", "created_at",
+                      "next_auto_assign_ip", "enable_dhcp", "ip_version",
+                      "first_ip", "last_ip"]
+        utils.filter_body(context, s, admin_only, always_pop)
 
-        dns_ips = s.pop("dns_nameservers", [])
-        host_routes = s.pop("host_routes", [])
-        gateway_ip = s.pop("gateway_ip", None)
+        dns_ips = utils.pop_param(s, "dns_nameservers", [])
+        host_routes = utils.pop_param(s, "host_routes", [])
+        gateway_ip = utils.pop_param(s, "gateway_ip", None)
 
         if gateway_ip:
             default_route = None
