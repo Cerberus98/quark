@@ -227,3 +227,9 @@ class Client(object):
         except redis.ConnectionError as e:
             LOG.exception(e)
             raise q_exc.RedisConnectionFailure()
+
+    def echo(self, echo_str):
+        return self._client.echo(echo_str)
+
+    def vif_count(self):
+        return len(self._client.keys("*.??-??-??-??-??-??"))

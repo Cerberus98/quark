@@ -596,6 +596,30 @@ def security_group_find(context, **filters):
     return query.filter(*model_filters)
 
 
+@scoped
+def security_group_count(context, **filters):
+    query = context.session.query(sql_func.count(models.SecurityGroup.id))
+    model_filters = _model_query(context, models.SecurityGroup, filters)
+    return query.filter(*model_filters).scalar()
+
+
+@scoped
+def ports_with_security_groups_find(context):
+    query = context.session.query(
+        models.port_group_association_table)
+    query = query.group_by(models.port_group_association_table.c.port_id)
+    print query
+    return query
+
+
+@scoped
+def ports_with_security_groups_count(context):
+    query = context.session.query(
+        sql_func.count(models.port_group_association_table.c.port_id))
+    query = query.group_by(models.port_group_association_table.c.port_id)
+    return query.scalar()
+
+
 def security_group_create(context, **sec_group_dict):
     new_group = models.SecurityGroup()
     new_group.update(sec_group_dict)
