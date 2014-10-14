@@ -66,6 +66,14 @@ quark_opts = [
 
 CONF.register_opts(quark_opts, "QUARK")
 
+# TODO(mdietz): Rewrite this to use a module level connection
+#               pool, and then incorporate that into creating
+#               connections. When connecting to a master we
+#               connect by creating a redis client, and when
+#               we connect to a slave, we connect by telling it
+#               we want a slave and ending up with a connection,
+#               with no control over SSL or anything else.  :-|
+
 
 class Client(object):
     connection_pool = None
