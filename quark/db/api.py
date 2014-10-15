@@ -605,9 +605,13 @@ def security_group_count(context, **filters):
 
 @scoped
 def ports_with_security_groups_find(context):
-    query = context.session.query(
-        models.port_group_association_table)
-    query = query.group_by(models.port_group_association_table.c.port_id)
+    aliased = orm.aliased(models.SecurityGroup)
+
+    query = context.session.query(models.Port)
+    query = query.join(aliased, models.Port.security_groups)
+    query = query.options(orm.contains_eager(models.Port.security_groups,
+                                             alias=aliased))
+    query = query.filter(models.SecurityGroup.id != None)
     print query
     return query
 
