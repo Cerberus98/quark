@@ -105,11 +105,17 @@ class QuarkRedisTool(object):
         print "Preparing to write rules for %s ports" % len(ports_with_groups)
         for port in ports_with_groups:
             mac = netaddr.EUI(port["mac_address"])
-            print "Writing rules for port %s on device %s" % (
-                mac, port["device_id"])
+
+            # Rather than loading everything in one giant chunk, we'll make
+            # trips per port.
+            group_ids = [g["id"] for g in port.security_groups]
+            rules = db_api.security_group_rule_find(ctx, group_id=group_ids,
+                                                    scope=db_api.ALL)
+            print "Writing %d rules for port %s on device %s" % (
+                len(rules), mac, port["device_id"])
 
             if not dryrun:
-                payload = client.serialize(port.security_groups)
+                payload = client.serialize_rules(rules)
                 client.apply_rules(port["device_id"], port["mac_address"],
                                    payload)
 

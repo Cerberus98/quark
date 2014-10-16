@@ -76,7 +76,7 @@ for _name, klass in inspect.getmembers(models, inspect.isclass):
 def _listify(filters):
     for key in ["name", "network_id", "id", "device_id", "tenant_id",
                 "subnet_id", "mac_address", "shared", "version", "segment_id",
-                "device_owner", "ip_address", "used_by_tenant_id"]:
+                "device_owner", "ip_address", "used_by_tenant_id", "group_id"]:
         if key in filters:
             if not filters[key]:
                 continue
@@ -104,6 +104,9 @@ def _model_query(context, model, filters, fields=None):
 
     if filters.get("id"):
         model_filters.append(model.id.in_(filters["id"]))
+
+    if filters.get("group_id"):
+        model_filters.append(model.group_id.in_(filters["group_id"]))
 
     if filters.get("reuse_after"):
         reuse_after = filters["reuse_after"]

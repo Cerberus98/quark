@@ -147,7 +147,41 @@ class Client(object):
         return func(CONF.QUARK.redis_sentinel_master,
                     connection_pool=Client.connection_pool)
 
-    def serialize(self, groups):
+    def serialize_rules(self, rules):
+        """Creates a payload for the redis server"""
+        # TODO(mdietz): If/when we support other rule types, this comment
+        #               will have to be revised.
+        # Action and direction are static, for now. The implementation may
+        # support 'deny' and 'egress' respectively in the future. We allow
+        # the direction to be set to something else, technically, but current
+        # plugin level call actually raises. It's supported here for unit
+        # test purposes at this time
+        serialized = []
+        for rule in rules:
+            direction = rule["direction"]
+            source = ''
+            destination = ''
+            if rule["remote_ip_prefix"]:
+                if direction == "ingress":
+                    source = netaddr.IPNetwork(rule["remote_ip_prefix"])
+                    source = str(source.ipv6())
+                else:
+                    destination = netaddr.IPNetwork(
+                        rule["remote_ip_prefix"])
+                    destination = str(destination.ipv6())
+
+            serialized.append(
+                {"ethertype": rule["ethertype"],
+                 "protocol": rule["protocol"],
+                 "port start": rule["port_range_min"],
+                 "port end": rule["port_range_max"],
+                 "source network": source,
+                 "destination network": destination,
+                 "action": "allow",
+                 "direction": "ingress"})
+        return serialized
+
+    def serialize_groups(self, groups):
         """Creates a payload for the redis server
 
         The rule schema is the following:
@@ -182,42 +216,10 @@ class Client(object):
           ]
         }
         """
-
-        rule_uuid = str(uuid.uuid4())
-        rule_dict = {"id": rule_uuid, "rules": []}
-
-        # TODO(mdietz): If/when we support other rule types, this comment
-        #               will have to be revised.
-        # Action and direction are static, for now. The implementation may
-        # support 'deny' and 'egress' respectively in the future. We allow
-        # the direction to be set to something else, technically, but current
-        # plugin level call actually raises. It's supported here for unit
-        # test purposes at this time
+        rules = []
         for group in groups:
-            for rule in group.rules:
-                direction = rule["direction"]
-                source = ''
-                destination = ''
-                if rule["remote_ip_prefix"]:
-                    if direction == "ingress":
-                        source = netaddr.IPNetwork(rule["remote_ip_prefix"])
-                        source = str(source.ipv6())
-                    else:
-                        destination = netaddr.IPNetwork(
-                            rule["remote_ip_prefix"])
-                        destination = str(destination.ipv6())
-
-                rule_dict["rules"].append(
-                    {"ethertype": rule["ethertype"],
-                     "protocol": rule["protocol"],
-                     "port start": rule["port_range_min"],
-                     "port end": rule["port_range_max"],
-                     "source network": source,
-                     "destination network": destination,
-                     "action": "allow",
-                     "direction": "ingress"})
-
-        return rule_dict
+            rules.extend(self.serialize_rules())
+        return rules
 
     def rule_key(self, device_id, mac_address):
         return "{0}.{1}".format(device_id, str(netaddr.EUI(mac_address)))
@@ -229,9 +231,11 @@ class Client(object):
         if not self._use_master:
             raise q_exc.RedisSlaveWritesForbidden()
 
+        ruleset_uuid = str(uuid.uuid4())
+        rule_dict = {"id": ruleset_uuid, "rules": rules}
         redis_key = self.rule_key(device_id, mac_address)
         try:
-            self._client.set(redis_key, json.dumps(rules))
+            self._client.set(redis_key, json.dumps(rule_dict))
         except redis.ConnectionError as e:
             LOG.exception(e)
             raise q_exc.RedisConnectionFailure()
