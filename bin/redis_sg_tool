@@ -21,7 +21,8 @@ Usage: redis_sg_tool [-h] [--config-file PATH]
     redis_sg_tool vifs-in-redis
     redis_sg_tool num-groups
     redis_sg_tool ports-with-groups
-    redis_sg_tool write-groups [--yarly]
+    redis_sg_tool write-groups [--yarly] [--retries=<retries>]
+                               [--retry-delay=<delay>]
 
 Options:
     -h --help       Show this screen.
@@ -29,7 +30,12 @@ Options:
     --config-file PATH  Use a different config file path
 """
 
+VERSION = 0.1
+RETRIES = 5
+RETRY_DELAY = 1
+
 import sys
+import time
 
 import docopt
 import netaddr
@@ -38,12 +44,21 @@ import neutron.context
 from oslo.config import cfg
 
 from quark.db import api as db_api
+from quark import exceptions as q_exc
 from quark.security_groups import redis_client
 
 
 class QuarkRedisTool(object):
     def __init__(self, arguments):
         self._args = arguments
+        self._retries = RETRIES
+        self._retry_delay = RETRY_DELAY
+        if self._args["--retries"]:
+            self._retries = int(self._args["--retries"])
+
+        if self._args["--retry-delay"]:
+            self._retry_delay = int(self._args["--retry-delay"])
+
         config_args = []
         if self._args["--config-file"]:
             config_args.append(self._args["--config-file"])
@@ -67,12 +82,15 @@ class QuarkRedisTool(object):
             dryrun = True
             if "--yarly" in self._args and self._args["--yarly"]:
                 dryrun = False
-            print self._args, dryrun
             self.write_groups(dryrun)
+        else:
+            print ("Redis security groups tool. Re-run with -h/--help for "
+                   "options")
 
     def _get_connection(self, use_master=False):
         client = redis_client.Client(use_master=use_master)
         try:
+            # You have to use the connection determine it's functional
             result = client.echo("connected")
             if result == "connected":
                 return client
@@ -102,25 +120,76 @@ class QuarkRedisTool(object):
         client = self._get_connection(use_master=not dryrun)
         ctx = neutron.context.get_admin_context()
         ports_with_groups = db_api.ports_with_security_groups_find(ctx).all()
-        print "Preparing to write rules for %s ports" % len(ports_with_groups)
+        if dryrun:
+            print ("Preparing to write rules for %s ports" %
+                   len(ports_with_groups))
+
+        if dryrun:
+            vifs = client.vif_count()
+            if vifs > 0:
+                print ("There are %d VIFs with rules in redis, some of which "
+                       "may be overwritten!" % vifs)
+
+        overwrite_count = 0
         for port in ports_with_groups:
             mac = netaddr.EUI(port["mac_address"])
+
+            if dryrun:
+                print ("Checking port %s with MAC %s on device %s" %
+                       (port["id"], mac, port["device_id"]))
+
+                existing_rules = client.get_rules_for_port(port["device_id"],
+                                                           port["mac_address"])
+                if existing_rules:
+                    overwrite_count += 1
+                    if dryrun:
+                        print ("WARNING: Port %s's rules will be overwritten"
+                               % port["id"])
 
             # Rather than loading everything in one giant chunk, we'll make
             # trips per port.
             group_ids = [g["id"] for g in port.security_groups]
             rules = db_api.security_group_rule_find(ctx, group_id=group_ids,
                                                     scope=db_api.ALL)
-            print "Writing %d rules for port %s on device %s" % (
-                len(rules), mac, port["device_id"])
+
+            if dryrun:
+                print "%d rules found in the database" % len(rules)
+                existing_len = len(existing_rules["rules"])
+                db_len = len(rules)
+                if existing_len != db_len:
+                    print ("Redis side rules for port %s likely out of date!" %
+                           port["id"])
+                    print "\tNumber of rules in redis:", existing_len
+                    print "\tNumber of rules in the database:", db_len
 
             if not dryrun:
-                payload = client.serialize_rules(rules)
-                client.apply_rules(port["device_id"], port["mac_address"],
-                                   payload)
+                for retry in xrange(self._retries):
+                    try:
+                        payload = client.serialize_rules(rules)
+                        client.apply_rules(
+                            port["device_id"], port["mac_address"], payload)
+                    except q_exc.RedisConnectionFailure:
+                        time.sleep(self._retry_delay)
+                        client = self._get_connection()
+
+        print "=" * 80
+        if dryrun:
+            print ("Total number of VIFs to overwrite/were overwritten: %s" %
+                   overwrite_count)
+            diff = vifs - overwrite_count
+            if diff > 0:
+                print "VIFs without matching database entries:", diff
+
+        print ("Total number of VIFs to write/were written: %d" %
+               len(ports_with_groups))
+
+        if dryrun:
+            print
+            print "rerun with --yarly to apply VIF changes!"
 
 
 if __name__ == "__main__":
-    arguments = docopt.docopt(__doc__, version="Quark Redis CLI 0.1")
+    arguments = docopt.docopt(__doc__,
+                              version="Quark Redis CLI %.2f" % VERSION)
     redis_tool = QuarkRedisTool(arguments)
     redis_tool.dispatch()

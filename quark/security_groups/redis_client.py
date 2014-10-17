@@ -224,6 +224,10 @@ class Client(object):
     def rule_key(self, device_id, mac_address):
         return "{0}.{1}".format(device_id, str(netaddr.EUI(mac_address)))
 
+    def get_rules_for_port(self, device_id, mac_address):
+        return json.loads(self._client.get(
+            self.rule_key(device_id, mac_address)))
+
     def apply_rules(self, device_id, mac_address, rules):
         """Writes a series of security group rules to a redis server."""
         LOG.info("Applying security group rules for device %s with MAC %s" %
