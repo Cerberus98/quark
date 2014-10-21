@@ -166,6 +166,14 @@ class QuarkIpam(object):
     def attempt_to_reallocate_ip(self, context, net_id, port_id, reuse_after,
                                  version=None, ip_address=None,
                                  segment_id=None, subnets=None, **kwargs):
+        log_str = ("REALLOCATE IP -> \n\t[network_id={0}, port_id={1}, "
+                   "version={2}, ip_address={3}, segment_id={4}, subnets={5}]")
+        log_str = log_str.format(net_id, port_id, version, ip_address,
+                                 segment_id, subnets)
+
+        def _log(text):
+            LOG.info("{0}: {1}".format(log_str, text))
+
         version = version or [4, 6]
         elevated = context.elevated()
 
@@ -196,6 +204,8 @@ class QuarkIpam(object):
                                              segment_id=segment_id)
                 sub_ids = [s["id"] for s in subnets]
                 if not sub_ids:
+                    _log("No subnets matching segment_id {0} could be "
+                         "found".format(segment_id))
                     raise exceptions.IpAddressGenerationFailure(
                         net_id=net_id)
 
@@ -213,6 +223,7 @@ class QuarkIpam(object):
         # we'll clean up multiple bad IPs if we find them (assuming something
         # is really wrong)
         for retry in xrange(cfg.CONF.QUARK.ip_address_retry_max):
+            _log("Attempt number {0}".format(retry + 1))
             get_policy = models.IPPolicy.get_ip_policy_cidrs
 
             try:
@@ -225,6 +236,8 @@ class QuarkIpam(object):
                     if address:
                         # NOTE(mdietz): We should always be in the CIDR but we
                         #              also said that before :-/
+                        _log("Potentially reallocatable IP found: {0}".format(
+                            address["address_readable"]))
                         subnet = address.get('subnet')
                         if subnet:
                             policy = get_policy(subnet)
@@ -237,10 +250,16 @@ class QuarkIpam(object):
                                 addr = addr.ipv6()
 
                             if policy is not None and addr in policy:
+                                _log("Deleting Address {0} due to policy "
+                                     "violation".format(
+                                         address["address_readable"]))
+
                                 context.session.delete(address)
                                 continue
 
                             if addr in cidr:
+                                _log("Marking Address {0} as allocated".format(
+                                    address["address_readable"]))
                                 updated_address = db_api.ip_address_update(
                                     elevated, address, deallocated=False,
                                     deallocated_at=None,
