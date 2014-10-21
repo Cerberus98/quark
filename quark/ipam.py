@@ -32,6 +32,7 @@ from oslo.db import exception as db_exception
 from quark.db import api as db_api
 from quark.db import models
 from quark import exceptions as q_exc
+from quark import utils
 
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
@@ -92,7 +93,14 @@ class QuarkIpam(object):
         if mac_address:
             mac_address = netaddr.EUI(mac_address).value
 
+        logger = utils.ContextLogger("allocate_mac_address", LOG.info,
+                                     network_id=net_id, port_id=port_id,
+                                     mac_address=mac_address)
+        logger.log("Attempting to allocate a new MAC address")
+
         for retry in xrange(cfg.CONF.QUARK.mac_address_retry_max):
+            logger.log("Attemping to reallocate deallocated MAC, attempt "
+                       "{0}".format(retry))
             try:
                 with context.session.begin():
                     deallocated_mac = db_api.mac_address_find(
@@ -100,6 +108,10 @@ class QuarkIpam(object):
                         deallocated=True, scope=db_api.ONE,
                         address=mac_address, order_by="address ASC")
                     if deallocated_mac:
+                        dealloc = netaddr.EUI(deallocated_mac)
+                        logger.log("Found a suitable deallocated MAC "
+                                   "{0}".format(str(dealloc)))
+
                         return db_api.mac_address_update(
                             context, deallocated_mac, deallocated=False,
                             deallocated_at=None)
@@ -108,10 +120,14 @@ class QuarkIpam(object):
                 LOG.exception("Error in mac reallocate...")
                 continue
 
+        logger.log("Couldn't find a suitable deallocated MAC")
+
         # This could fail if a large chunk of MACs were chosen explicitly,
         # but under concurrent load enough MAC creates should iterate without
         # any given thread exhausting its retry count.
         for retry in xrange(cfg.CONF.QUARK.mac_address_retry_max):
+            logger.log("Attemping to creaet a new MAC, attempt "
+                       "{0}".format(retry))
             next_address = None
             with context.session.begin():
                 try:
@@ -122,6 +138,7 @@ class QuarkIpam(object):
                         break
 
                     rng, addr_count = mac_range
+                    logger.log("Found a MAC range {0}".format(rng["cidr"]))
 
                     last = rng["last_address"]
                     first = rng["first_address"]
@@ -132,6 +149,7 @@ class QuarkIpam(object):
                         # in this range
                         rng["next_auto_assign_mac"] = -1
                         context.session.add(rng)
+                        logger.log("MAC range {0} is full".format(rng["cidr"]))
                         continue
 
                     if mac_address:
@@ -141,6 +159,8 @@ class QuarkIpam(object):
                         next_auto = next_address + 1
                         if next_auto > last:
                             next_auto = -1
+                        logger.log("Requested MAC was found and deallocated, "
+                                   "marking as allocated")
                         db_api.mac_address_range_update(
                             context, rng, next_auto_assign_mac=next_auto)
 
@@ -152,12 +172,18 @@ class QuarkIpam(object):
             # was explicitly chosen at some point. As such, fall through
             # here and get in line for a new MAC address to try
             try:
+                mac_readable = str(netaddr.EUI(next_address))
+                logger.log("Attempting to create new MAC {0}".format(
+                    mac_readable))
                 with context.session.begin():
                     address = db_api.mac_address_create(
                         context, address=next_address,
                         mac_address_range_id=rng["id"])
+                    logger.log("Attempting to create new MAC")
                     return address
             except Exception:
+                logger.log("Failed to create new MAC {0}".format(
+                    mac_readable))
                 LOG.exception("Error in creating mac. MAC possibly duplicate")
                 continue
 
@@ -166,16 +192,14 @@ class QuarkIpam(object):
     def attempt_to_reallocate_ip(self, context, net_id, port_id, reuse_after,
                                  version=None, ip_address=None,
                                  segment_id=None, subnets=None, **kwargs):
-        log_str = ("REALLOCATE IP -> \n\t[network_id={0}, port_id={1}, "
-                   "version={2}, ip_address={3}, segment_id={4}, subnets={5}]")
-        log_str = log_str.format(net_id, port_id, version, ip_address,
-                                 segment_id, subnets)
-
-        def _log(text):
-            LOG.info("{0}: {1}".format(log_str, text))
-
         version = version or [4, 6]
         elevated = context.elevated()
+        logger = utils.ContextLogger("attempt_to_reallocate_ip", LOG.info,
+                                     network_id=net_id, port_id=port_id,
+                                     version=version, segment_id=segment_id,
+                                     subnets=subnets)
+
+        logger.log("Attempting to reallocate an IP Address")
 
         if version == 6 and "mac_address" in kwargs and kwargs["mac_address"]:
             # Defers to the create case. The reason why is we'd have to look
@@ -204,8 +228,8 @@ class QuarkIpam(object):
                                              segment_id=segment_id)
                 sub_ids = [s["id"] for s in subnets]
                 if not sub_ids:
-                    _log("No subnets matching segment_id {0} could be "
-                         "found".format(segment_id))
+                    logger.log("No subnets matching segment_id {0} could be "
+                               "found".format(segment_id))
                     raise exceptions.IpAddressGenerationFailure(
                         net_id=net_id)
 
@@ -223,7 +247,7 @@ class QuarkIpam(object):
         # we'll clean up multiple bad IPs if we find them (assuming something
         # is really wrong)
         for retry in xrange(cfg.CONF.QUARK.ip_address_retry_max):
-            _log("Attempt number {0}".format(retry + 1))
+            logger.log("Attempt number {0}".format(retry + 1))
             get_policy = models.IPPolicy.get_ip_policy_cidrs
 
             try:
@@ -236,8 +260,8 @@ class QuarkIpam(object):
                     if address:
                         # NOTE(mdietz): We should always be in the CIDR but we
                         #              also said that before :-/
-                        _log("Potentially reallocatable IP found: {0}".format(
-                            address["address_readable"]))
+                        logger.log("Potentially reallocatable IP found: "
+                                   "{0}".format(address["address_readable"]))
                         subnet = address.get('subnet')
                         if subnet:
                             policy = get_policy(subnet)
@@ -250,16 +274,18 @@ class QuarkIpam(object):
                                 addr = addr.ipv6()
 
                             if policy is not None and addr in policy:
-                                _log("Deleting Address {0} due to policy "
-                                     "violation".format(
-                                         address["address_readable"]))
+                                logger.log("Deleting Address {0} due to "
+                                           "policy violation".format(
+                                               address["address_readable"]))
 
                                 context.session.delete(address)
                                 continue
 
                             if addr in cidr:
-                                _log("Marking Address {0} as allocated".format(
-                                    address["address_readable"]))
+                                logger.log("Marking Address {0} as "
+                                           "allocated".format(
+                                               address["address_readable"]))
+
                                 updated_address = db_api.ip_address_update(
                                     elevated, address, deallocated=False,
                                     deallocated_at=None,
@@ -270,6 +296,9 @@ class QuarkIpam(object):
                                 return [updated_address]
                             else:
                                 # Make sure we never find it again
+                                logger.log("Address {0} isn't in the subnet "
+                                           "it claims to be in".format(
+                                               address["address_readable"]))
                                 context.session.delete(address)
                     else:
                         break
@@ -282,6 +311,12 @@ class QuarkIpam(object):
 
     def _allocate_from_subnet(self, context, net_id, subnet,
                               port_id, reuse_after, ip_address=None, **kwargs):
+        logger = utils.ContextLogger("allocate_from_subnet", LOG.info,
+                                     network_id=net_id, port_id=port_id,
+                                     subnet=subnet, ip_address=ip_address)
+        logger.log("Creating a new address in subnet {0}".format(
+            subnet["_cidr"]))
+
         ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
         next_ip = ip_address
         if not next_ip:
@@ -292,11 +327,13 @@ class QuarkIpam(object):
 
             if subnet["ip_version"] == 4:
                 next_ip = next_ip.ipv4()
-
+        logger.log("Next ip {0}".format(str(next_ip)))
         if ip_policy_cidrs and next_ip in ip_policy_cidrs and not ip_address:
+            logger.log("Next ip {0} violates policy".format(str(next_ip)))
             raise q_exc.IPAddressPolicyRetryableFailure(ip_addr=next_ip,
                                                         net_id=net_id)
         try:
+            logger.log("Creating ip {0}".format(str(next_ip)))
             with context.session.begin():
                 address = db_api.ip_address_create(
                     context, address=next_ip, subnet_id=subnet["id"],
@@ -330,9 +367,15 @@ class QuarkIpam(object):
         each and every subnet in the existing reallocate logic, as we'd
         have to iterate over each and every subnet returned
         """
+        logger = utils.ContextLogger("allocate_from_v6_subnet", LOG.info,
+                                     network_id=net_id, port_id=port_id,
+                                     ip_address=ip_address)
+        logger.log("Attempting to allocate a v6 address")
 
         if (ip_address or "mac_address" not in kwargs or
                 not kwargs["mac_address"]):
+            logger.log("No MAC addressed supplied, defaulting to sequential "
+                       "allocation")
             return self._allocate_from_subnet(context, net_id=net_id,
                                               subnet=subnet, port_id=port_id,
                                               reuse_after=reuse_after,
@@ -344,15 +387,20 @@ class QuarkIpam(object):
                             subnet["cidr"])):
 
                 if tries > CONF.QUARK.v6_allocation_attempts - 1:
+                    logger.log("Exceeded v6 allocation attempts, bailing")
                     raise exceptions.IpAddressGenerationFailure(
                         net_id=net_id)
 
                 ip_address = netaddr.IPAddress(ip_address)
+                logger.log("Generated a new v6 address {0}".format(
+                    str(ip_address)))
 
                 # NOTE(mdietz): treating the IPSet as a boolean caused netaddr
                 #               to attempt to enumerate the entire set!
                 if (ip_policy_cidrs is not None and
                         ip_address in ip_policy_cidrs):
+                    logger.log("Address {0} excluded by policy".format(
+                        str(ip_address)))
                     continue
 
                 # TODO(mdietz): replace this with a compare-and-swap loop
@@ -364,6 +412,8 @@ class QuarkIpam(object):
                         lock_mode=True)
 
                     if address:
+                        logger.log("Address {0} exists, claiming".format(
+                            str(ip_address)))
                         return db_api.ip_address_update(
                             context, address, deallocated=False,
                             deallocated_at=None,
@@ -374,6 +424,7 @@ class QuarkIpam(object):
                 # either because we missed it due to our filters above, or
                 # in an extremely unlikely race between the find and here.
                 try:
+                    logger.log("Creating address {0}".format(str(ip_address)))
                     with context.session.begin():
                         return db_api.ip_address_create(
                             context, address=ip_address,
@@ -381,16 +432,27 @@ class QuarkIpam(object):
                             version=subnet["ip_version"], network_id=net_id,
                             address_type=kwargs.get('address_type', 'fixed'))
                 except db_exception.DBDuplicateEntry:
+                    logger.log("{0} exists but was already "
+                               "allocated".format(str(ip_address)))
                     LOG.debug("Duplicate entry found when inserting subnet_id"
                               " %s ip_address %s", subnet["id"], ip_address)
 
     def _allocate_ips_from_subnets(self, context, new_addresses, net_id,
                                    subnets, port_id, reuse_after,
                                    ip_address=None, **kwargs):
+        logger = utils.ContextLogger("allocate_ips_from_subnets", LOG.info,
+                                     network_id=net_id, port_id=port_id,
+                                     new_addresses=new_addresses,
+                                     ip_address=ip_address)
+        logger.log("Allocating multiple IPs from chosen subnets")
+
         subnets = subnets or []
         for subnet in subnets:
             if not subnet:
                 continue
+
+            logger.log("Attempting to allocate from {0}".format(
+                subnet["_cidr"]))
 
             address = None
             if int(subnet["ip_version"]) == 4:
@@ -404,6 +466,8 @@ class QuarkIpam(object):
                                                         reuse_after,
                                                         ip_address, **kwargs)
             if address:
+                logger.log("Created address {0}".format(
+                    address["address_readable"]))
                 new_addresses.append(address)
 
         return new_addresses
@@ -426,6 +490,14 @@ class QuarkIpam(object):
         subnets = subnets or []
         ip_addresses = ip_addresses or []
 
+        logger = utils.ContextLogger("allocate_ip_address", LOG.info,
+                                     network_id=net_id, port_id=port_id,
+                                     new_addresses=new_addresses,
+                                     ip_addresses=ip_addresses,
+                                     subnets=subnets, segment_id=segment_id,
+                                     version=version)
+        logger.log("Allocating IP address(es)")
+
         def _try_reallocate_ip_address(ip_addr=None):
             new_addresses.extend(self.attempt_to_reallocate_ip(
                 context, net_id, port_id, reuse_after, version=None,
@@ -434,6 +506,7 @@ class QuarkIpam(object):
 
         def _try_allocate_ip_address(ip_addr=None, sub=None):
             for retry in xrange(cfg.CONF.QUARK.ip_address_retry_max):
+                logger.log("Allocating IP attempt {0}".format(retry))
                 if not sub:
                     subnets = self._choose_available_subnet(
                         elevated, net_id, version, segment_id=segment_id,
@@ -443,6 +516,7 @@ class QuarkIpam(object):
                                                   ip_addr, segment_id,
                                                   subnet_ids=[sub])]
 
+                logger.log("Found possible subnets {0}".format(subnets))
                 try:
                     self._allocate_ips_from_subnets(context, new_addresses,
                                                     net_id, subnets,
@@ -523,18 +597,28 @@ class QuarkIpam(object):
     # - fix off-by-one error and overflow
     def select_subnet(self, context, net_id, ip_address, segment_id,
                       subnet_ids=None, **filters):
+        logger = utils.ContextLogger("select_subnet", LOG.info,
+                                     network_id=net_id, ip_address=ip_address,
+                                     segment_id=segment_id,
+                                     subnet_ids=subnet_ids)
+        logger.log("Selecting subnet(s)")
+
         subnets = db_api.subnet_find_ordered_by_most_full(
             context, net_id, segment_id=segment_id, scope=db_api.ALL,
             subnet_id=subnet_ids, **filters)
 
         for subnet, ips_in_subnet in subnets:
             ipnet = netaddr.IPNetwork(subnet["cidr"])
+            logger.log("Trying subnet {0} {1}".format(subnet["id"],
+                                                      subnet["_cidr"]))
             if ip_address:
                 na_ip = netaddr.IPAddress(ip_address)
                 if ipnet.version == 4 and na_ip.version != 4:
                     na_ip = na_ip.ipv4()
                 if na_ip not in ipnet:
                     if subnet_ids is not None:
+                        logger.log("Requested IP {0} not in subnet {1}, "
+                                   "retrying".format(str(na_ip), str(ipnet)))
                         raise q_exc.IPAddressNotInSubnet(
                             ip_addr=ip_address, subnet_id=subnet["id"])
                     continue
@@ -556,10 +640,14 @@ class QuarkIpam(object):
                     # and even then if it is outside the valid range set it to
                     # -1 to be safe
                     if ip < subnet["first_ip"] or ip > subnet["last_ip"]:
+                        logger.log("Marking subnet {0} as full".format(
+                            subnet["id"]))
                         ip = -1
                     self._set_subnet_next_auto_assign_ip(context, subnet, ip)
+                logger.log("Found viable subnet {0}".format(subnet["id"]))
                 return subnet
             else:
+                logger.log("Marking subnet {0} as full".format(subnet["id"]))
                 self._set_subnet_next_auto_assign_ip(context, subnet, -1)
 
     def _set_subnet_next_auto_assign_ip(self, context, subnet, ip):

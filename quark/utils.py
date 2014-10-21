@@ -151,3 +151,13 @@ class CommandManager(object):
                 cmd(do.result)
             except Exception:
                 LOG.exception("Rollback failed and wasn't caught!")
+
+
+class ContextLogger(object):
+    def __init__(self, preamble, log_handler, **keys):
+        log_keys = ', '.join(["%s=%s" % (k, v) for k, v in keys.iteritems()])
+        self._log_str = "{0} [{1}]".format(preamble, log_keys)
+        self._log_handler = log_handler
+
+    def log(self, msg):
+        self._log_handler("{0} - {1}".format(self._log_str, msg))
