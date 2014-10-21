@@ -516,7 +516,9 @@ class QuarkIpam(object):
                                                   ip_addr, segment_id,
                                                   subnet_ids=[sub])]
 
-                logger.log("Found possible subnets {0}".format(subnets))
+                logger.log("Found {0} possible subnets - {1}".format(
+                    len(subnets), subnets))
+
                 try:
                     self._allocate_ips_from_subnets(context, new_addresses,
                                                     net_id, subnets,
