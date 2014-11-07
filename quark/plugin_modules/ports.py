@@ -42,6 +42,20 @@ def _raise_if_unauthorized(tenant_id, net):
         raise exceptions.NotAuthorized()
 
 
+def _check_device_not_on_network(context, net_id, device_id):
+    # NOTE (Perkins): If a device_id is given, try to prevent multiple ports
+    # from being created for a device already attached to the network
+    if device_id:
+        existing_ports = db_api.port_find(context,
+                                          network_id=net_id,
+                                          device_id=device_id,
+                                          scope=db_api.ONE)
+        if existing_ports:
+            raise exceptions.BadRequest(
+                resource="port", msg="This device is already connected to the "
+                "requested network via another port")
+
+
 def create_port(context, port):
     """Create a port
 
@@ -75,17 +89,7 @@ def create_port(context, port):
         raise exceptions.NetworkNotFound(net_id=net_id)
     _raise_if_unauthorized(context.tenant_id, net)
 
-    # NOTE (Perkins): If a device_id is given, try to prevent multiple ports
-    # from being created for a device already attached to the network
-    if device_id:
-        existing_ports = db_api.port_find(context,
-                                          network_id=net_id,
-                                          device_id=device_id,
-                                          scope=db_api.ONE)
-        if existing_ports:
-            raise exceptions.BadRequest(
-                resource="port", msg="This device is already connected to the "
-                "requested network via another port")
+    _check_device_not_on_network(context, net_id, device_id)
 
     if not STRATEGY.is_parent_network(net_id):
         # We don't honor segmented networks when they aren't "shared"
@@ -117,6 +121,30 @@ def create_port(context, port):
     backend_port = None
 
     with utils.CommandManager().execute() as cmd_mgr:
+        @cmd_mgr.do
+        def _begin_allocate_db_port(net, port_id):
+            LOG.info("Including extra plugin attrs: %s" % backend_port)
+            port_attrs["network_id"] = net["id"]
+            # TODO(mdietz): This will be updated at the end. Cannot be NULL,
+            #               currently, but we should probably drop the column
+            #               since it's redundant with any optimized driver.
+            port_attrs["backend_key"] = port_id
+            with context.session.begin():
+                new_port = db_api.port_create(context, **port_attrs)
+            return new_port
+
+        @cmd_mgr.undo
+        def _begin_allocate_db_port_undo(new_port):
+            LOG.info("Rolling back database port...")
+            if not new_port:
+                return
+            try:
+                with context.session.begin():
+                    db_api.port_delete(context, new_port)
+            except Exception:
+                LOG.exception(
+                    "Couldn't rollback db port %s" % backend_port)
+
         @cmd_mgr.do
         def _allocate_ips(fixed_ips, net, port_id, segment_id, mac):
             subnets = []
@@ -186,7 +214,7 @@ def create_port(context, port):
             return backend_port
 
         @cmd_mgr.undo
-        def _allocate_back_port_undo(backend_port):
+        def _allocate_backend_port_undo(backend_port):
             LOG.info("Rolling back backend port...")
             try:
                 net_driver.delete_port(context, backend_port["uuid"])
@@ -195,22 +223,25 @@ def create_port(context, port):
                     "Couldn't rollback backend port %s" % backend_port)
 
         @cmd_mgr.do
-        def _allocate_db_port(port_attrs, backend_port, addresses, mac):
-            port_attrs["network_id"] = net["id"]
-            port_attrs["id"] = port_id
+        def _end_allocate_db_port(new_port, port_attrs, backend_port,
+                                  addresses, mac):
             port_attrs["security_groups"] = security_groups
-
             LOG.info("Including extra plugin attrs: %s" % backend_port)
+            # Replace the stubbed backend_key with the real one
+            port_attrs.pop("backend_key", None)
             port_attrs.update(backend_port)
             with context.session.begin():
-                new_port = db_api.port_create(
-                    context, addresses=addresses, mac_address=mac["address"],
+                # NOTE(mdietz): this may be redundant
+                _check_device_not_on_network(context, net_id, device_id)
+                new_port = db_api.port_update(
+                    context, new_port, addresses=addresses,
+                    mac_address=mac["address"],
                     backend_key=backend_port["uuid"], **port_attrs)
 
             return new_port
 
         @cmd_mgr.undo
-        def _allocate_db_port_undo(new_port):
+        def _end_allocate_db_port_undo(new_port):
             LOG.info("Rolling back database port...")
             if not new_port:
                 return
@@ -222,10 +253,12 @@ def create_port(context, port):
                     "Couldn't rollback db port %s" % backend_port)
 
         # addresses, mac, backend_port, new_port
+        new_port = _begin_allocate_db_port(net, port_id)
         mac = _allocate_mac(net, port_id, mac_address)
         _allocate_ips(fixed_ips, net, port_id, segment_id, mac)
         backend_port = _allocate_backend_port(mac, addresses, net, port_id)
-        new_port = _allocate_db_port(port_attrs, backend_port, addresses, mac)
+        new_port = _end_allocate_db_port(new_port, port_attrs, backend_port,
+                                         addresses, mac)
 
     return v._make_port_dict(new_port)
 
