@@ -24,6 +24,8 @@ from oslo.utils import timeutils
 from sqlalchemy import event
 from sqlalchemy import func as sql_func
 from sqlalchemy import and_, asc, desc, orm, or_, not_
+from sqlalchemy import Numeric
+from sqlalchemy import sql
 
 from quark.db import models
 from quark import network_strategy
@@ -458,6 +460,31 @@ def network_count_all(context):
 
 def network_delete(context, network):
     context.session.delete(network)
+
+
+def subnet_find_most_full_by_next_auto_assign(context, net_id, **filters):
+    # NOTE(mdietz): this was the first incantation that didn't invoke the
+    #               sqlalchemy balrog. If someone has a better idea of how to
+    #               solve this, please share.
+    remaining = (models.Subnet.last_ip - models.Subnet.next_auto_assign_ip)
+    ips_in_subnet = sql.expression.label(
+        "ips_in_subnet", sql.cast(models.Subnet.next_auto_assign_ip -
+                                  models.Subnet.first_ip, Numeric))
+    query = context.session.query(models.Subnet, ips_in_subnet)
+    query = query.with_lockmode('update')
+    query = query.filter_by(do_not_use=False)
+    query = query.group_by(models.Subnet.id)
+    query = query.order_by(asc(remaining))
+
+    query = query.filter(models.Subnet.network_id == net_id)
+    if "ip_version" in filters:
+        query = query.filter(models.Subnet.ip_version == filters["ip_version"])
+    if "segment_id" in filters and filters["segment_id"]:
+        query = query.filter(models.Subnet.segment_id == filters["segment_id"])
+    if "subnet_id" in filters and filters["subnet_id"]:
+        query = query.filter(models.Subnet.id.in_(filters["subnet_id"]))
+    query = query.filter(models.Subnet.next_auto_assign_ip != -1)
+    return query
 
 
 def subnet_find_ordered_by_most_full(context, net_id, **filters):

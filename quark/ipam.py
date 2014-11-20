@@ -58,7 +58,12 @@ quark_opts = [
     cfg.BoolOpt("ipam_use_synchronization",
                 default=False,
                 help=_("Configures whether or not to use the experimental"
-                       " semaphore logic around IPAM"))
+                       " semaphore logic around IPAM")),
+    cfg.BoolOpt("subnet_find_most_full_by_next_auto_assign",
+                default=False,
+                help=_("Configures whether to get the most full subnet by "
+                       "counting IP addresses or by subtracting "
+                       "next_auto_assign_ip from last_ip."))
 ]
 
 CONF.register_opts(quark_opts, "QUARK")
@@ -669,7 +674,11 @@ class QuarkIpam(object):
                                 segment_id=segment_id, subnet_ids=subnet_ids,
                                 ip_version=filters.get("ip_version"))))
 
-        subnets = db_api.subnet_find_ordered_by_most_full(
+        subnet_selector = db_api.subnet_find_ordered_by_most_full
+        if CONF.QUARK.subnet_find_most_full_by_next_auto_assign:
+            subnet_selector = db_api.subnet_find_most_full_by_next_auto_assign
+
+        subnets = subnet_selector(
             context, net_id, segment_id=segment_id, scope=db_api.ALL,
             subnet_id=subnet_ids, **filters)
 
