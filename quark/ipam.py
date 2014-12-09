@@ -60,7 +60,7 @@ quark_opts = [
                 help=_("Configures whether or not to use the experimental"
                        " semaphore logic around IPAM")),
     cfg.BoolOpt("subnet_find_most_full_by_next_auto_assign",
-                default=False,
+                default=True,
                 help=_("Configures whether to get the most full subnet by "
                        "counting IP addresses or by subtracting "
                        "next_auto_assign_ip from last_ip."))
