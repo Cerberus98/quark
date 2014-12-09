@@ -721,6 +721,13 @@ class QuarkIpam(object):
                         LOG.info("Marking subnet {0} as full".format(
                             subnet["id"]))
                         ip = -1
+                    # TODO(mdietz):
+                    # This has the potential to timeout and fail. It's probably
+                    # why we see "skipped" IPs in the database. We should pull
+                    # this out, have retries, and do a select before the
+                    # update. The select will check and see if the current
+                    # counter is the expected value, and only try to update
+                    # if it actually matches
                     self._set_subnet_next_auto_assign_ip(context, subnet, ip)
                 LOG.info("Subnet {0} - {1} looks viable, returning".format(
                     subnet["id"], subnet["_cidr"]))

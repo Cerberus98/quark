@@ -463,6 +463,7 @@ def network_delete(context, network):
 
 
 def subnet_find_most_full_by_next_auto_assign(context, net_id, **filters):
+    # TODO(mdietz): Would it make sense to do a limit 1 here?
     # NOTE(mdietz): this was the first incantation that didn't invoke the
     #               sqlalchemy balrog. If someone has a better idea of how to
     #               solve this, please share.
@@ -488,6 +489,7 @@ def subnet_find_most_full_by_next_auto_assign(context, net_id, **filters):
 
 
 def subnet_find_ordered_by_most_full(context, net_id, **filters):
+    # TODO(mdietz): Would it make sense to do a limit 1 here?
     count = sql_func.count(models.IPAddress.address).label("count")
     size = (models.Subnet.last_ip - models.Subnet.first_ip)
     query = context.session.query(models.Subnet, count).with_lockmode('update')
