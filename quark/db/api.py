@@ -500,6 +500,7 @@ def subnet_update_next_auto_assign_ip(context, subnet):
 def subnet_update_set_full(context, subnet):
     query = context.session.query(models.Subnet)
     query = query.filter_by(id=subnet["id"])
+    query = query.filter(models.Subnet.next_auto_assign_ip != -1)
 
     # For details on synchronize_session, see:
     # http://docs.sqlalchemy.org/en/rel_0_8/orm/query.html

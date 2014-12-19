@@ -710,17 +710,19 @@ class QuarkIpam(object):
                         if ip < subnet["first_ip"] or ip > subnet["last_ip"]:
                             LOG.info("Marking subnet {0} as full".format(
                                 subnet["id"]))
-                            db_api.subnet_update_set_full(context, subnet)
+                            updated = db_api.subnet_update_set_full(context,
+                                                                    subnet)
                         else:
                             updated = db_api.subnet_update_next_auto_assign_ip(
                                 context, subnet)
-                            if updated:
-                                context.session.refresh(subnet)
-                            else:
-                                # This means the subnet was marked full while
-                                # we were checking out policies. Fall out and
-                                # go back to the outer retry loop.
-                                return
+
+                        if updated:
+                            context.session.refresh(subnet)
+                        else:
+                            # This means the subnet was marked full while
+                            # we were checking out policies. Fall out and
+                            # go back to the outer retry loop.
+                            return
 
                     LOG.info("Subnet {0} - {1} {2} looks viable, "
                              "returning".format(subnet["id"], subnet["_cidr"],
