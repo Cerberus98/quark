@@ -724,6 +724,7 @@ class QuarkIpam(object):
                                 context, subnet)
                             if updated:
                                 context.session.refresh(subnet)
+                                LOG.critical(subnet["next_auto_assign_ip"])
                             else:
                                 # This means the subnet was marked full while
                                 # we were checking out policies
