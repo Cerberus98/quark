@@ -478,13 +478,10 @@ def subnet_find_ordered_by_most_full(context, net_id, **filters):
 
     if "subnet_id" in filters and filters["subnet_id"]:
         query = query.filter(models.Subnet.id.in_(filters["subnet_id"]))
-    else:
-        # Attempt to limit the number of rows we actually lock
-        query = query.limit(1)
     return query
 
 
-def subnet_update_next_auto_assign(context, subnet):
+def subnet_update_next_auto_assign_ip(context, subnet):
     query = context.session.query(models.Subnet)
     query = query.filter(models.Subnet.id == subnet["id"])
     query = query.filter(models.Subnet.next_auto_assign_ip != -1)

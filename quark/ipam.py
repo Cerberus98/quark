@@ -704,31 +704,23 @@ class QuarkIpam(object):
                 if ipnet.size > (ips_in_subnet + policy_size - 1):
                     if not ip_address:
                         ip = subnet["next_auto_assign_ip"]
-                        # If ip is somehow -1 in here don't touch it anymore
-                        # and even then if it is outside the valid range set it
-                        # to -1 to be safe
-                        if ip != -1:
-                            ip += 1
-
                         # NOTE(mdietz): When atomically updated, this probably
                         #               doesn't need the lower bounds check but
-                        #               I'm not comfortable removing it.
-                        #               Furthermore, the above logic is
-                        #               probably also pointless.
+                        #               I'm not comfortable removing it yet.
                         if ip < subnet["first_ip"] or ip > subnet["last_ip"]:
                             LOG.info("Marking subnet {0} as full".format(
                                 subnet["id"]))
                             db_api.subnet_update_set_full(context, subnet)
                         else:
-                            updated = db_api.subnet_update_next_auto_assign(
+                            updated = db_api.subnet_update_next_auto_assign_ip(
                                 context, subnet)
                             if updated:
                                 context.session.refresh(subnet)
-                                LOG.critical(subnet["next_auto_assign_ip"])
                             else:
                                 # This means the subnet was marked full while
-                                # we were checking out policies
-                                return None
+                                # we were checking out policies. Fall out and
+                                # go back to the outer retry loop.
+                                return
 
                     LOG.info("Subnet {0} - {1} {2} looks viable, "
                              "returning".format(subnet["id"], subnet["_cidr"],
