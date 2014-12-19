@@ -1,4 +1,4 @@
-# Copyright 2013 Openstack Foundation
+# Copyright 2014 Openstack Foundation
 # All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -463,7 +463,8 @@ def network_delete(context, network):
 def subnet_find_ordered_by_most_full(context, net_id, **filters):
     count = sql_func.count(models.IPAddress.address).label("count")
     size = (models.Subnet.last_ip - models.Subnet.first_ip)
-    query = context.session.query(models.Subnet, count).with_lockmode('update')
+    query = context.session.query(models.Subnet, count)
+    # .with_lockmode('update')
     query = query.filter_by(do_not_use=False)
     query = query.outerjoin(models.Subnet.generated_ips)
     query = query.group_by(models.Subnet.id)
@@ -474,9 +475,43 @@ def subnet_find_ordered_by_most_full(context, net_id, **filters):
         query = query.filter(models.Subnet.ip_version == filters["ip_version"])
     if "segment_id" in filters and filters["segment_id"]:
         query = query.filter(models.Subnet.segment_id == filters["segment_id"])
+    query = query.filter(models.Subnet.next_auto_assign_ip != -1)
+
     if "subnet_id" in filters and filters["subnet_id"]:
         query = query.filter(models.Subnet.id.in_(filters["subnet_id"]))
+    else:
+        # Attempt to limit the number of rows we actually lock
+        query = query.limit(1)
+    return query
+
+
+def subnet_update_next_auto_assign(context, subnet):
+    query = context.session.query(models.Subnet)
+    query = query.filter(models.Subnet.id == subnet["id"])
     query = query.filter(models.Subnet.next_auto_assign_ip != -1)
+
+    # For details on synchronize_session, see:
+    # http://docs.sqlalchemy.org/en/rel_0_8/orm/query.html
+    query = query.update(
+        {"next_auto_assign_ip":
+         models.Subnet.next_auto_assign_ip + 1},
+        synchronize_session=False)
+
+    # Returns a count of the rows matched in the update
+    return query
+
+
+def subnet_update_set_full(context, subnet):
+    query = context.session.query(models.Subnet)
+    query = query.filter_by(id=subnet["id"])
+
+    # For details on synchronize_session, see:
+    # http://docs.sqlalchemy.org/en/rel_0_8/orm/query.html
+    query = query.update(
+        {"next_auto_assign_ip": -1},
+        synchronize_session=False)
+
+    # Returns a count of the rows matched in the update
     return query
 
 

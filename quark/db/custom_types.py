@@ -34,6 +34,11 @@ class INET(types.TypeDecorator):
             return value
         return long(value)
 
+    def coerce_compared_value(self, op, value):
+        if isinstance(value, int):
+            return types.Integer()
+        return self
+
 
 class MACAddress(types.TypeDecorator):
     impl = types.BigInteger
