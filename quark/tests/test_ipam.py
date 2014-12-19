@@ -415,10 +415,12 @@ class QuarkIpamTestBothIpAllocation(QuarkIpamBaseTest):
             subnet_update.return_value = 1
 
             def refresh_mock(sub):
-                sub["next_auto_assign_ip"] += 1
+                if sub["next_auto_assign_ip"] >= 0:
+                    sub["next_auto_assign_ip"] += 1
 
             def set_full_mock(context, sub):
                 sub["next_auto_assign_ip"] = -1
+                return 1
 
             refresh.side_effect = refresh_mock
             subnet_set_full.side_effect = set_full_mock
@@ -437,7 +439,7 @@ class QuarkIpamTestBothIpAllocation(QuarkIpamBaseTest):
                          next_auto_assign_ip=255,
                          ip_policy=dict(size=2))
         net3 = netaddr.IPNetwork("2.2.2.0/24")
-        subnet4_3 = dict(id=2, first_ip=net3.first, last_ip=net3.last,
+        subnet4_3 = dict(id=3, first_ip=net3.first, last_ip=net3.last,
                          cidr=net3.cidr, ip_version=net3.version,
                          next_auto_assign_ip=255,
                          ip_policy=dict(size=2))
@@ -787,10 +789,12 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
             subnet_update.return_value = 1
 
             def refresh_mock(sub):
-                sub["next_auto_assign_ip"] += 1
+                if sub["next_auto_assign_ip"] != -1:
+                    sub["next_auto_assign_ip"] += 1
 
             def set_full_mock(context, sub):
                 sub["next_auto_assign_ip"] = -1
+                return 1
 
             refresh.side_effect = refresh_mock
             subnet_set_full.side_effect = set_full_mock
@@ -1156,6 +1160,7 @@ class QuarkNewIPAddressAllocation(QuarkIpamBaseTest):
 
             def set_full_mock(context, sub):
                 sub["next_auto_assign_ip"] = -1
+                return 1
 
             refresh.side_effect = refresh_mock
             subnet_set_full.side_effect = set_full_mock
@@ -1412,6 +1417,7 @@ class QuarkIPAddressAllocationTestRetries(QuarkIpamBaseTest):
 
             def set_full_mock(context, sub):
                 sub["next_auto_assign_ip"] = -1
+                return 1
 
             refresh.side_effect = refresh_mock
             subnet_set_full.side_effect = set_full_mock
@@ -1495,8 +1501,10 @@ class QuarkIPAddressAllocationTestRetries(QuarkIpamBaseTest):
                     self.context, [], 0, 0, 0, ip_addresses=["0.0.1.0"],
                     subnets=subnet1)
 
-    def test_allocate_last_ip_closes_subnet(self):
-        subnet1 = dict(id=1, first_ip=0, last_ip=1, next_auto_assign_ip=2,
+    def test_allocate_last_ip_allocates(self):
+        # NOTE(mdietz): test originally checked if the subnet closed. Now
+        #               we're letting the next allocation take care of it
+        subnet1 = dict(id=1, first_ip=0, last_ip=1, next_auto_assign_ip=1,
                        cidr="0.0.0.0/31", ip_version=4,
                        ip_policy=None)
         subnets = [(subnet1, 1)]
@@ -1505,8 +1513,6 @@ class QuarkIPAddressAllocationTestRetries(QuarkIpamBaseTest):
                                                                     addr_mods):
             addr = []
             self.ipam.allocate_ip_address(self.context, addr, 0, 0, 0)
-            closed_sub = sub_mods[0][0]
-            self.assertEqual(closed_sub["next_auto_assign_ip"], -1)
             self.assertEqual(addr[0]["address"], 1)
 
 
@@ -1615,6 +1621,7 @@ class TestQuarkIpPoliciesIpAllocation(QuarkIpamBaseTest):
 
             def set_full_mock(context, sub):
                 sub["next_auto_assign_ip"] = -1
+                return 1
 
             refresh.side_effect = refresh_mock
             subnet_set_full.side_effect = set_full_mock
