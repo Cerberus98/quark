@@ -107,7 +107,13 @@ def rfc3041_ip(port_id, cidr):
 
 
 def generate_v6(mac, port_id, cidr):
-    yield rfc2462_ip(mac, cidr)
+    # NOTE(mdietz): RM10879 - if we don't have a MAC, don't panic, defer to
+    #               our magic rfc3041_ip method instead. If an IP is created
+    #               the ip_addresses controller, we wouldn't necessarily have
+    #               a MAC to base our generator on in that case for example.
+    if mac is not None:
+        yield rfc2462_ip(mac, cidr)
+
     for addr in rfc3041_ip(port_id, cidr):
         yield addr
 
@@ -438,19 +444,21 @@ class QuarkIpam(object):
             utils.pretty_kwargs(network_id=net_id, subnet=subnet,
                                 port_id=port_id, ip_address=ip_address)))
 
-        if (ip_address or "mac_address" not in kwargs or
-                not kwargs["mac_address"]):
-            LOG.info("No MAC addressed supplied, defaulting to sequential "
-                     "allocation")
+        if ip_address:
+            LOG.info("IP %s explicitly requested, deferring to standard "
+                     "allocation" % ip_address)
             return self._allocate_from_subnet(context, net_id=net_id,
                                               subnet=subnet, port_id=port_id,
                                               reuse_after=reuse_after,
                                               ip_address=ip_address, **kwargs)
         else:
+            mac = kwargs.get("mac_address")
+            if mac:
+                mac = kwargs["mac_address"].get("address")
+
             ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
             for tries, ip_address in enumerate(
-                generate_v6(kwargs["mac_address"]["address"], port_id,
-                            subnet["cidr"])):
+                generate_v6(mac, port_id, subnet["cidr"])):
 
                 LOG.info("Attempt {0} of {1}".format(
                     tries + 1, CONF.QUARK.v6_allocation_attempts))
@@ -741,16 +749,18 @@ class QuarkIpam(object):
                             updated = db_api.subnet_update_set_full(context,
                                                                     subnet)
                         else:
-                            updated = db_api.subnet_update_next_auto_assign_ip(
-                                context, subnet)
+                            auto_inc = db_api.subnet_update_next_auto_assign_ip
+                            if subnet["ip_version"] == 4:
+                                updated = auto_inc(context, subnet)
 
-                        if updated:
-                            context.session.refresh(subnet)
-                        else:
-                            # This means the subnet was marked full while
-                            # we were checking out policies. Fall out and
-                            # go back to the outer retry loop.
-                            return
+                                if updated:
+                                    context.session.refresh(subnet)
+                                else:
+                                    # This means the subnet was marked full
+                                    # while we were checking out policies.
+                                    # Fall out and go back to the outer retry
+                                    # loop.
+                                    return
 
                     LOG.info("Subnet {0} - {1} {2} looks viable, "
                              "returning".format(subnet["id"], subnet["_cidr"],
