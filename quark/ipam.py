@@ -109,8 +109,9 @@ def rfc3041_ip(port_id, cidr):
 def generate_v6(mac, port_id, cidr):
     # NOTE(mdietz): RM10879 - if we don't have a MAC, don't panic, defer to
     #               our magic rfc3041_ip method instead. If an IP is created
-    #               the ip_addresses controller, we wouldn't necessarily have
-    #               a MAC to base our generator on in that case for example.
+    #               by the ip_addresses controller, we wouldn't necessarily
+    #               have a MAC to base our generator on in that case for
+    #               example.
     if mac is not None:
         yield rfc2462_ip(mac, cidr)
 
