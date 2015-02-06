@@ -1008,6 +1008,7 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
 
     def test_allocate_gets_one_ip_but_unsatisfied_strategy_fails(self):
         mac_adress = 0
+        port_id = "236a48ed-dca8-41a8-bb1a-6e3e8d8d687e"
         old_override = cfg.CONF.QUARK.ip_address_retry_max
         cfg.CONF.set_override('ip_address_retry_max', 1, 'QUARK')
 
@@ -1023,13 +1024,13 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
                            size=2,
                            exclude=[
                                models.IPPolicyCIDR(cidr="feed::/128"),
-                               models.IPPolicyCIDR(cidr="feed::ff:ffff/128")]))
+                               models.IPPolicyCIDR(cidr="feed::200:ff:fe00:0/128")]))
 
         with self._stubs(subnets=[[(subnet4, 0)], [(subnet6, 0)]],
                           addresses=[None, None, None, None]):
             address = []
             with self.assertRaises(exceptions.IpAddressGenerationFailure):
-                self.ipam.allocate_ip_address(self.context, address, 0, 0, 0,
+                self.ipam.allocate_ip_address(self.context, address, 0, port_id, 0,
                                               mac_address=0)
             self.assertEqual(address[0]["address"],
                              netaddr.IPAddress("::ffff:0.0.0.1").value)
