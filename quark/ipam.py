@@ -112,6 +112,7 @@ def generate_v6(mac, port_id, cidr):
     #               by the ip_addresses controller, we wouldn't necessarily
     #               have a MAC to base our generator on in that case for
     #               example.
+    print mac, port_id, cidr
     if mac is not None:
         yield rfc2462_ip(mac, cidr)
 
@@ -739,11 +740,12 @@ class QuarkIpam(object):
                 policy_size = ip_policy["size"] if ip_policy else 0
 
                 if ipnet.size > (ips_in_subnet + policy_size - 1):
-                    if not ip_address:
+                    if not ip_address and subnet["ip_version"] == 4:
                         ip = subnet["next_auto_assign_ip"]
                         # NOTE(mdietz): When atomically updated, this probably
                         #               doesn't need the lower bounds check but
                         #               I'm not comfortable removing it yet.
+                        updated = 0
                         if ip < subnet["first_ip"] or ip > subnet["last_ip"]:
                             LOG.info("Marking subnet {0} as full".format(
                                 subnet["id"]))
@@ -751,17 +753,16 @@ class QuarkIpam(object):
                                                                     subnet)
                         else:
                             auto_inc = db_api.subnet_update_next_auto_assign_ip
-                            if subnet["ip_version"] == 4:
-                                updated = auto_inc(context, subnet)
+                            updated = auto_inc(context, subnet)
 
-                                if updated:
-                                    context.session.refresh(subnet)
-                                else:
-                                    # This means the subnet was marked full
-                                    # while we were checking out policies.
-                                    # Fall out and go back to the outer retry
-                                    # loop.
-                                    return
+                        if updated:
+                            context.session.refresh(subnet)
+                        else:
+                            # This means the subnet was marked full
+                            # while we were checking out policies.
+                            # Fall out and go back to the outer retry
+                            # loop.
+                            return
 
                     LOG.info("Subnet {0} - {1} {2} looks viable, "
                              "returning".format(subnet["id"], subnet["_cidr"],
