@@ -459,7 +459,7 @@ class QuarkIpam(object):
 
             ip_policy_cidrs = models.IPPolicy.get_ip_policy_cidrs(subnet)
             for tries, ip_address in enumerate(
-                generate_v6(mac, port_id, subnet["cidr"])):
+                    generate_v6(mac, port_id, subnet["cidr"])):
 
                 LOG.info("Attempt {0} of {1}".format(
                     tries + 1, CONF.QUARK.v6_allocation_attempts))

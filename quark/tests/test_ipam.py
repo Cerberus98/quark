@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import contextlib
-import uuid
 
 import mock
 import netaddr
@@ -1014,7 +1013,6 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
             self.assertEqual(address[1]['address_type'], 'fixed')
 
     def test_allocate_gets_one_ip_but_unsatisfied_strategy_fails(self):
-        mac_adress = 0
         port_id = "236a48ed-dca8-41a8-bb1a-6e3e8d8d687e"
         old_override = cfg.CONF.QUARK.ip_address_retry_max
         cfg.CONF.set_override('ip_address_retry_max', 1, 'QUARK')
@@ -1033,10 +1031,10 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
                            exclude=[
                                models.IPPolicyCIDR(cidr="feed::/128"),
                                models.IPPolicyCIDR(
-                                cidr="feed::200:ff:fe00:0/128")]))
+                                   cidr="feed::200:ff:fe00:0/128")]))
 
         with self._stubs(subnets=[[(subnet4, 0)], [(subnet6, 0)]],
-                          addresses=[None, None, None, None]):
+                         addresses=[None, None, None, None]):
             address = []
             with self.assertRaises(exceptions.IpAddressGenerationFailure):
                 self.ipam.allocate_ip_address(self.context, address, 0,
@@ -1271,7 +1269,7 @@ class QuarkNewIPAddressAllocation(QuarkIpamBaseTest):
 
             refresh.side_effect = refresh_mock
             subnet_set_full.side_effect = set_full_mock
-            yield
+            yield addr_find
 
     def test_allocate_new_ip_address_in_empty_subnet(self):
         subnet = dict(id=1, first_ip=0, last_ip=255,
