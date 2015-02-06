@@ -986,6 +986,11 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
             self.assertEqual(addresses[1]['address_type'], 'fixed')
 
     def test_reallocate_deallocated_v4_v6(self):
+        mac_address = 0
+        subnet6 = dict(id=1, first_ip=self.v6_fip.value,
+                       last_ip=self.v6_lip.value, cidr="feed::/104",
+                       ip_version=6, next_auto_assign_ip=-1,
+                       ip_policy=None)
         address1 = models.IPAddress()
         address1["address"] = self.v46_val
         address1["version"] = 4
@@ -993,11 +998,13 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
         address2 = models.IPAddress()
         address2["address"] = 42
         address2["version"] = 6
-        address2["subnet"] = models.Subnet(cidr="::ffff:0:0/96")
-        with self._stubs(subnets=[[]],
+        address2["subnet"] = subnet6["cidr"]
+
+        with self._stubs(subnets=[[(subnet6, 0)]],
                          addresses=[address1, address2]):
             address = []
-            self.ipam.allocate_ip_address(self.context, address, 0, 0, 0)
+            self.ipam.allocate_ip_address(self.context, address, 0, 0, 0,
+                                          mac_address=mac_address)
             self.assertEqual(len(address), 2)
             self.assertEqual(address[0]["address"], self.v46_val)
             self.assertEqual(address[0]["version"], 4)
@@ -1011,6 +1018,7 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
         port_id = "236a48ed-dca8-41a8-bb1a-6e3e8d8d687e"
         old_override = cfg.CONF.QUARK.ip_address_retry_max
         cfg.CONF.set_override('ip_address_retry_max', 1, 'QUARK')
+        cfg.CONF.set_override('v6_allocation_attempts', 1, 'QUARK')
 
         subnet4 = dict(id=1, first_ip=0, last_ip=255,
                        cidr="0.0.0.0/24", ip_version=4,
@@ -1024,14 +1032,15 @@ class QuarkIpamTestBothRequiredIpAllocation(QuarkIpamBaseTest):
                            size=2,
                            exclude=[
                                models.IPPolicyCIDR(cidr="feed::/128"),
-                               models.IPPolicyCIDR(cidr="feed::200:ff:fe00:0/128")]))
+                               models.IPPolicyCIDR(
+                                cidr="feed::200:ff:fe00:0/128")]))
 
         with self._stubs(subnets=[[(subnet4, 0)], [(subnet6, 0)]],
                           addresses=[None, None, None, None]):
             address = []
             with self.assertRaises(exceptions.IpAddressGenerationFailure):
-                self.ipam.allocate_ip_address(self.context, address, 0, port_id, 0,
-                                              mac_address=0)
+                self.ipam.allocate_ip_address(self.context, address, 0,
+                                              port_id, 0, mac_address=0)
             self.assertEqual(address[0]["address"],
                              netaddr.IPAddress("::ffff:0.0.0.1").value)
 
