@@ -112,7 +112,6 @@ def generate_v6(mac, port_id, cidr):
     #               by the ip_addresses controller, we wouldn't necessarily
     #               have a MAC to base our generator on in that case for
     #               example.
-    print mac, port_id, cidr
     if mac is not None:
         yield rfc2462_ip(mac, cidr)
 
@@ -266,7 +265,7 @@ class QuarkIpam(object):
                                 version=version, segment_id=segment_id,
                                 subnets=subnets)))
 
-        if version == 6 and "mac_address" in kwargs and kwargs["mac_address"]:
+        if version == 6:
             # Defers to the create case. The reason why is we'd have to look
             # up subnets here to correctly generate the v6. If we split them
             # up into reallocate and create, we'd be looking up the same
@@ -599,7 +598,6 @@ class QuarkIpam(object):
                     subnets = [self.select_subnet(context, net_id,
                                                   ip_addr, segment_id,
                                                   subnet_ids=[sub])]
-
                 LOG.info("Subnet selection returned {0} viable subnet(s) - "
                          "IDs: {1}".format(len(subnets),
                                            ", ".join([str(s["id"])
@@ -834,7 +832,6 @@ class QuarkIpamBOTH(QuarkIpam):
             filters["ip_version"] = ver
             sub = self.select_subnet(context, net_id, ip_address, segment_id,
                                      **filters)
-
             if sub:
                 both_subnet_versions.append(sub)
         if not reallocated_ips and not both_subnet_versions:
