@@ -30,7 +30,6 @@ from sqlalchemy.orm import class_mapper
 
 from quark.db import models
 from quark import network_strategy
-from quark import port_vlan_id
 from quark import protocols
 
 
@@ -231,12 +230,11 @@ def port_count_all(context, **filters):
 
 
 def port_create(context, **port_dict):
-    port = models.Port(tags=[])
+    port = models.Port()
     port.update(port_dict)
     port["tenant_id"] = context.tenant_id
     if "addresses" in port_dict:
         port["ip_addresses"].extend(port_dict["addresses"])
-    _port_store_vlan_id(port, **port_dict)
     context.session.add(port)
     return port
 
@@ -285,20 +283,9 @@ def update_port_associations_for_ip(context, ports, address):
                                 assoc_ports - new_ports, new_address)
 
 
-def _port_store_vlan_id(port, **kwargs):
-    if "vlan_id" in kwargs:
-        try:
-            port_vlan_id.store_vlan_id(port, kwargs.pop("vlan_id"))
-        except Exception as e:
-            LOG.error("Exception occurred while trying to store VLAN ID on "
-                      "port '%(port_id)d': %(message)s",
-                      {'port_id': port.id, 'message': e.message})
-
-
 def port_update(context, port, **kwargs):
     if "addresses" in kwargs:
         port["ip_addresses"] = kwargs.pop("addresses")
-    _port_store_vlan_id(port, **kwargs)
     port.update(kwargs)
     context.session.add(port)
     return port
