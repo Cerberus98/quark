@@ -59,5 +59,9 @@ class JSONStrategy(object):
     def is_provider_network(self, net_id):
         return self.strategy.get(net_id) is not None
 
+    def subnet_ids_for_network(self, net_id):
+        if net_id in self.strategy:
+            return self.strategy.get(net_id)["subnets"]
+
 
 STRATEGY = JSONStrategy()

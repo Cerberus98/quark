@@ -42,6 +42,10 @@ quark_view_opts = [
                 default=True,
                 help=_('Controls whether or not to show ip_policy_id for'
                        'subnets')),
+    cfg.BoolOpt('show_provider_subnets_with_networks',
+                default=False,
+                help=_('Controls whether or not to sho the providernet '
+                       'subnet IDs.')),
 ]
 
 CONF.register_opts(quark_view_opts, "QUARK")
@@ -49,6 +53,12 @@ CONF.register_opts(quark_view_opts, "QUARK")
 
 def _is_default_route(route):
     return route.value == 0
+
+
+def _provider_subnets(net_id):
+    if CONF.QUARK.show_provider_subnets_with_networks:
+        return STRATEGY.subnet_ids_for_network(network["id"])
+    return []
 
 
 def _make_network_dict(network, fields=None):
@@ -69,7 +79,7 @@ def _make_network_dict(network, fields=None):
         else:
             res["subnets"] = [s["id"] for s in network.get("subnets", [])]
     else:
-        res["subnets"] = []
+        res["subnets"] = _provider_subnets(network["id"])
     return res
 
 
