@@ -24,22 +24,10 @@ from quark.tests import test_base
 class TestJSONStrategy(test_base.TestBase):
     def setUp(self):
         self.context = None
-        self.strategy = {"public_network":
-                         {"required": True,
-                          "bridge": "xenbr0"}}
+        self.strategy = {"public_network": {"bridge": "xenbr0",
+                                            "subnets": ["public"]}}
         strategy_json = json.dumps(self.strategy)
         cfg.CONF.set_override("default_net_strategy", strategy_json, "QUARK")
-
-    def test_get_assignable_networks_default_strategy(self):
-        json_strategy = network_strategy.JSONStrategy()
-        net_ids = json_strategy.get_assignable_networks(self.context)
-        self.assertEqual("public_network", net_ids[0])
-
-    def test_get_assignable_networks_custom_strategy(self):
-        custom = {"private_network": self.strategy["public_network"]}
-        json_strategy = network_strategy.JSONStrategy(json.dumps(custom))
-        net_ids = json_strategy.get_assignable_networks(self.context)
-        self.assertEqual("private_network", net_ids[0])
 
     def test_get_network(self):
         json_strategy = network_strategy.JSONStrategy()

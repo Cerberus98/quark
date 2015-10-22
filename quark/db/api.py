@@ -572,7 +572,7 @@ def network_find(context, limit=None, sorts=None, marker=None,
             filters.pop("id")
 
     if "shared" in filters:
-        defaults = STRATEGY.get_assignable_networks(context)
+        defaults = STRATEGY.get_provider_networks(context)
         if True in filters["shared"]:
             if ids:
                 defaults = [net for net in ids if net in defaults]
@@ -705,20 +705,75 @@ def subnet_update_set_alloc_pool_cache(context, subnet, cache_data=None):
 
 
 @scoped
-def subnet_find(context, limit=None, page_reverse=False, sorts=None,
-                marker_obj=None, **filters):
-    if "shared" in filters and True in filters["shared"]:
-        return []
+def subnet_find(context, limit=None, sorts=None, marker=None,
+                page_reverse=False, fields=None, **filters):
+    ids = []
+    defaults = []
+    provider_query = False
+    if "id" in filters:
+        ids, defaults = STRATEGY.split_subnet_ids(context, filters["id"])
+        if not ids and defaults and "shared" not in filters:
+            provider_query = True
+        if ids:
+            filters["id"] = ids
+        else:
+            filters.pop("id")
+
+    if "shared" in filters:
+        defaults = STRATEGY.get_provider_subnets(context)
+        if True in filters["shared"]:
+            if ids:
+                defaults = [sub for sub in ids if sub in defaults]
+                filters.pop("id")
+            if not defaults:
+                return []
+        else:
+            defaults.insert(0, INVERT_DEFAULTS)
+        filters.pop("shared")
+    return _subnet_find(context, limit, sorts, marker, page_reverse, fields,
+                        defaults=defaults, provider_query=provider_query,
+                        **filters)
+
+
+def _subnet_find(context, limit, sorts, marker, page_reverse, fields,
+                 defaults=None, provider_query=False, **filters):
     query = context.session.query(models.Subnet)
-    model_filters = _model_query(context, models.Subnet, filters)
+    model_filters = _model_query(context, models.Subnet, filters, query)
 
-    if "join_dns" in filters:
-        query = query.options(orm.joinedload(models.Subnet.dns_nameservers))
+    if defaults:
+        invert_defaults = False
+        if INVERT_DEFAULTS in defaults:
+            invert_defaults = True
+            defaults.pop(0)
+        if filters and invert_defaults:
+            query = query.filter(and_(not_(models.Subnet.id.in_(defaults)),
+                                      and_(*model_filters)))
+        elif not provider_query and filters and not invert_defaults:
+            query = query.filter(or_(models.Network.id.in_(defaults),
+                                     and_(*model_filters)))
 
-    if "join_routes" in filters:
-        query = query.options(orm.joinedload(models.Subnet.routes))
-    return paginate_query(query.filter(*model_filters), models.Subnet, limit,
-                          sorts, marker_obj)
+        elif not invert_defaults:
+            query = query.filter(models.Subnet.id.in_(defaults))
+    else:
+        query = query.filter(*model_filters)
+
+    return paginate_query(query, models.Subnet, limit, sorts, marker)
+
+#@scoped
+#def subnet_find(context, limit=None, page_reverse=False, sorts=None,
+#                marker_obj=None, **filters):
+#    if "shared" in filters and True in filters["shared"]:
+#        return []
+#    query = context.session.query(models.Subnet)
+#    model_filters = _model_query(context, models.Subnet, filters)
+#
+#    if "join_dns" in filters:
+#        query = query.options(orm.joinedload(models.Subnet.dns_nameservers))
+#
+#    if "join_routes" in filters:
+#        query = query.options(orm.joinedload(models.Subnet.routes))
+#    return paginate_query(query.filter(*model_filters), models.Subnet, limit,
+#                          sorts, marker_obj)
 
 
 def subnet_count_all(context, **filters):
